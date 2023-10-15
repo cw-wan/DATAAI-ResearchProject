@@ -18,10 +18,6 @@ DEFAULT_AUDIO_FRAME_SHIFT_MS = 10  # in milliseconds
 
 
 class ToTensorVideo(nn.Module):
-    """
-    Convert tensor data type from uint8 to float, divide value by 255.0 and
-    permute the dimensions of clip tensor
-    """
 
     def __init__(self):
         super().__init__()
@@ -83,7 +79,9 @@ def _get_clip_timepoints(clip_sampler, duration):
     return all_clips_timepoints
 
 
-def _load_video(video_path, max_frames, fps,
+def _load_video(video_path,
+                max_frames,
+                fps,
                 num_mel_bins=128,
                 target_length=204,
                 sample_rate=16000,
