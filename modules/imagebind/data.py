@@ -142,24 +142,23 @@ def load_and_transform_audio_data(
         )
         all_clips = []
         for clip_timepoints in all_clips_timepoints:
-            waveform_clip = waveform[
+            waveform_clip = waveform[  # shape (num_channels, clip_duration * sample_rate)
                             :,
                             int(clip_timepoints[0] * sample_rate): int(
                                 clip_timepoints[1] * sample_rate
                             ),
                             ]
-            waveform_melspec = waveform2melspec(
+            waveform_melspec = waveform2melspec(  # shape (1, num_mel_bins, target_length)
                 waveform_clip, sample_rate, num_mel_bins, target_length
             )
             all_clips.append(waveform_melspec)
-
         normalize = transforms.Normalize(mean=mean, std=std)
         all_clips = [normalize(ac).to(device) for ac in all_clips]
 
         all_clips = torch.stack(all_clips, dim=0)
         audio_outputs.append(all_clips)
 
-    return torch.stack(audio_outputs, dim=0)
+    return torch.stack(audio_outputs, dim=0)  # shape (batch_size, clips_per_video, 1, num_mel_bins, target_length)
 
 
 def crop_boxes(boxes, x_offset, y_offset):
