@@ -1,4 +1,5 @@
 import os
+import torch
 from torch.utils.data import Dataset
 from utils import VideoLoader
 import pandas as pd
@@ -44,7 +45,9 @@ class DataloaderMELD(Dataset):
                                      "dia" + str(row["Dialogue_ID"]) + "_utt" + str(row["Utterance_ID"]) + ".mp4")
                 if os.path.exists(video):
                     try:
-                        utt["vision"], utt["video_mask"], utt["audio"] = videoloader.load(video)
+                        vision, video_mask, utt["audio"] = videoloader.load(video)
+                        # perform mean pooling to get an 'average' frame for each utterance video clip
+                        utt["vision"] = torch.mean(vision[:torch.sum(video_mask).type(torch.int32)], dim=0)
                         self.data.append(utt)
                     except Exception as e:
                         logging.warning("{} {} {}".format(subset, video, e))
@@ -61,7 +64,7 @@ class DataloaderMELD(Dataset):
                 self.data = pickle.load(f)
 
     def __len__(self):
-        pass
+        return len(self.data)
 
     def __getitem__(self, idx):
         return self.data[idx]

@@ -143,7 +143,7 @@ def _load_video(video_path,
     frames_mask = torch.zeros([max_frames, ]).float()
     vision_output = torch.zeros([max_frames, 3, h, w]).float()
     vision_output[0:t] = frames
-    frames_mask[0:t] = 1.
+    frames_mask[0:t] = 1
     return vision_output, frames_mask, audio_output
 
 
