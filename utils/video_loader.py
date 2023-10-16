@@ -1,7 +1,6 @@
 # Adapted from https://github.com/facebookresearch/ImageBind/blob/main/imagebind/data.py
 import os
 import torch
-import logging
 import torchaudio
 import pydub
 import torchvision.transforms
@@ -49,14 +48,14 @@ def _waveform2melspec(waveform, sample_rate, num_mel_bins, target_length):
     n_frames = fbank.size(1)
     p = target_length - n_frames
     # if p is too large (say >20%), flash a warning
-    if abs(p) / n_frames > 0.2:
-        logging.warning(
-            "Large gap between audio n_frames(%d) and "
-            "target_length (%d). Is the audio_target_length "
-            "setting correct?",
-            n_frames,
-            target_length,
-        )
+    # if abs(p) / n_frames > 0.2:
+    #     logging.warning(
+    #         "Large gap between audio n_frames(%d) and "
+    #         "target_length (%d). Is the audio_target_length "
+    #         "setting correct?",
+    #         n_frames,
+    #         target_length,
+    #     )
     # cut and pad
     if p > 0:
         fbank = torch.nn.functional.pad(fbank, (0, p), mode="constant", value=0)
@@ -97,6 +96,14 @@ def _load_video(video_path,
         video = pydub.AudioSegment.from_file(video_path, format="mp4")
         video.export(audio_path, format="wav")
     waveform, sr = torchaudio.load(audio_path)
+    if sample_rate != sr:
+        waveform = torchaudio.functional.resample(
+            waveform, orig_freq=sr, new_freq=sample_rate
+        )
+    # incase the waveform length is too small
+    if waveform.shape[1] < clip_duration * sample_rate:
+        padding = torch.zeros([waveform.shape[0], clip_duration * sample_rate - waveform.shape[1]])
+        waveform = torch.cat([waveform, padding], dim=1)
     os.remove(audio_path)
     if sample_rate != sr:
         waveform = torchaudio.functional.resample(
@@ -131,6 +138,7 @@ def _load_video(video_path,
     indices = np.arange(start, end, step).astype(int).tolist()
     frames = vr.get_batch(indices)  # (T, H, W, C)
     frames = frames.float().permute(0, 3, 1, 2)  # (T, C, H, W)
+    frames = frames[:max_frames, :]
     t, _, h, w = frames.size()
     frames_mask = torch.zeros([max_frames, ]).float()
     vision_output = torch.zeros([max_frames, 3, h, w]).float()

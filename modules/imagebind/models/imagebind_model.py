@@ -476,7 +476,7 @@ class ImageBindModel(nn.Module):
         return outputs
 
 
-def imagebind_huge(ckpt_path=None):
+def imagebind_huge(ckpt_path):
     model = ImageBindModel(
         vision_embed_dim=1280,
         vision_num_blocks=32,

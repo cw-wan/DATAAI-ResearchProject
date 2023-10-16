@@ -137,6 +137,8 @@ def load_and_transform_audio_data(
             waveform = torchaudio.functional.resample(
                 waveform, orig_freq=sr, new_freq=sample_rate
             )
+        # test short audio
+        # waveform = waveform[:, :16000]
         all_clips_timepoints = get_clip_timepoints(
             clip_sampler, waveform.size(1) / sample_rate
         )
