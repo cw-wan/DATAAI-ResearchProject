@@ -22,12 +22,14 @@ inputs = {
     ModalityType.AUDIO: data.load_and_transform_audio_data(audio_paths, device),
 }
 
+print('Text Input Shape {}'.format(inputs[ModalityType.TEXT].shape))
 print('Vision Input Shape {}'.format(inputs[ModalityType.VISION].shape))
 print('Audio Input Shape {}'.format(inputs[ModalityType.AUDIO].shape))
 
 with torch.no_grad():
     embeddings = model(inputs)
 
+print('Vision Embedding Shape {}'.format(embeddings[ModalityType.VISION].shape))
 print('Audio Embedding Shape {}'.format(embeddings[ModalityType.AUDIO].shape))
 
 print(
