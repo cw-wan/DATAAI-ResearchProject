@@ -1,3 +1,4 @@
+# Adapted from https://github.com/XpastaX/ConFEDE/blob/Graph_Main/MOSI/model/net/constrastive/TVA_fusion.py
 from decoder.classifier import BaseClassifier
 from imagebind.models.imagebind_model import ImageBindModel
 from torch import nn
@@ -77,14 +78,14 @@ class TVAFusion(nn.Module):
         text1 = sample1["text"]
         vision1 = sample1["vision"].clone().detach().to(self.device)
         audio1 = sample1["audio"].clone().detach().to(self.device)
-        token1 = tokenize([text1, ], device=self.device)
+        token1 = tokenize(text1, device=self.device)
         inputs1 = {
-            ModalityType.TEXT: token1.unsqueeze(0),
-            ModalityType.VISION: vision1.unsqueeze(0),
-            ModalityType.AUDIO: audio1.unsqueeze(0)
+            ModalityType.TEXT: token1,
+            ModalityType.VISION: vision1,
+            ModalityType.AUDIO: audio1
         }
         embeddings1 = self.imagebind(inputs1)
 
-        x1_t_embed = embeddings1[ModalityType.TEXT].squeeze()
-        x1_v_embed = embeddings1[ModalityType.VISION].squeeze()
-        x1_a_embed = embeddings1[ModalityType.AUDIO].squeeze()
+        x1_t_embed = embeddings1[ModalityType.TEXT]
+        x1_v_embed = embeddings1[ModalityType.VISION]
+        x1_a_embed = embeddings1[ModalityType.AUDIO]
