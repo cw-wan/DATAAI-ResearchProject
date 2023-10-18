@@ -134,8 +134,10 @@ def _load_video(video_path,
     v_len = len(vr)
     v_fps = vr.get_avg_fps()
     start, end = 0, v_len
-    step = int(v_fps) / fps
+    # Sparse uniform sample strategy
+    step = int(v_fps) / fps if max_frames >= fps * v_len / v_fps else int((v_len - 1) / (max_frames - 1))
     indices = np.arange(start, end, step).astype(int).tolist()
+    # print(" {}, {}, {}".format(v_len, step, indices))
     frames = vr.get_batch(indices)  # (T, H, W, C)
     frames = frames.float().permute(0, 3, 1, 2)  # (T, C, H, W)
     frames = frames[:max_frames, :]

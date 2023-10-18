@@ -1,5 +1,4 @@
 import os
-import torch
 from torch.utils.data import Dataset
 from utils import VideoLoader
 import pandas as pd
@@ -17,7 +16,8 @@ class DataloaderMELD(Dataset):
     def __init__(self,
                  path,
                  subset,
-                 fps):
+                 fcnt=4,
+                 fps=1):
         self.path = {
             'train': os.path.join(path, 'train'),
             'dev': os.path.join(path, 'dev'),
@@ -26,7 +26,7 @@ class DataloaderMELD(Dataset):
         assert subset in ['train', 'dev', 'test']
         self.data_path = os.path.join(self.path[subset], subset + ".pkl")
         if not os.path.exists(self.data_path):
-            videoloader = VideoLoader(224, 16, fps)
+            videoloader = VideoLoader(224, fcnt, fps)
             video_path = os.path.join(self.path[subset], subset + "_splits")
             csv_path = os.path.join(self.path[subset], subset + "_sent_emo.csv")
             csv_data = pd.read_csv(csv_path)
@@ -45,9 +45,7 @@ class DataloaderMELD(Dataset):
                                      "dia" + str(row["Dialogue_ID"]) + "_utt" + str(row["Utterance_ID"]) + ".mp4")
                 if os.path.exists(video):
                     try:
-                        vision, video_mask, utt["audio"] = videoloader.load(video)
-                        # perform mean pooling to get an 'average' frame for each utterance video clip
-                        utt["vision"] = torch.mean(vision[:torch.sum(video_mask).type(torch.int32)], dim=0)
+                        utt["vision"], utt["video_mask"], utt["audio"] = videoloader.load(video)
                         self.data.append(utt)
                     except Exception as e:
                         logging.warning("{} {} {}".format(subset, video, e))
