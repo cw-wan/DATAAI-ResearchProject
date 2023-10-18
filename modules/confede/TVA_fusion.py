@@ -1,10 +1,10 @@
 # Adapted from https://github.com/XpastaX/ConFEDE/blob/Graph_Main/MOSI/model/net/constrastive/TVA_fusion.py
-from decoder.classifier import BaseClassifier
-from imagebind.models.imagebind_model import ImageBindModel
+from modules.confede.decoder.classifier import BaseClassifier
+from modules.imagebind.models.imagebind_model import ImageBindModel
 from torch import nn
 import configs.config_meld as default_config
-from imagebind.data import load_and_transform_text as tokenize
-from imagebind.models.imagebind_model import ModalityType
+from modules.imagebind.data import load_and_transform_text as tokenize
+from modules.imagebind.models.imagebind_model import ModalityType
 
 
 class Projector(nn.Module):
@@ -79,6 +79,7 @@ class TVAFusion(nn.Module):
         vision1 = sample1["vision"].clone().detach().to(self.device)
         audio1 = sample1["audio"].clone().detach().to(self.device)
         token1 = tokenize(text1, device=self.device)
+
         inputs1 = {
             ModalityType.TEXT: token1,
             ModalityType.VISION: vision1,
