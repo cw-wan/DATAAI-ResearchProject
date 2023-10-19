@@ -1,4 +1,5 @@
 # Adapted from https://github.com/XpastaX/ConFEDE/blob/Graph_Main/MOSI/model/net/constrastive/TVA_fusion.py
+import torch
 from modules.confede.decoder.classifier import BaseClassifier
 from modules.imagebind.models.imagebind_model import ImageBindModel
 from torch import nn
@@ -71,6 +72,27 @@ class TVAFusion(nn.Module):
 
         self.device = config.DEVICE
 
+    def encode(self, text, vision, video_mask, audio):
+        tokenized_text = tokenize(text, device=self.device)
+        batch_size, fcnt, c, h, w = vision.shape
+        vision = vision.view(batch_size * fcnt, c, h, w)
+        inputs = {
+            ModalityType.TEXT: tokenized_text,
+            ModalityType.VISION: vision,
+            ModalityType.AUDIO: audio
+        }
+        embeddings = self.imagebind(inputs)
+        v_embed = embeddings[ModalityType.VISION]
+        a_embed = embeddings[ModalityType.AUDIO]
+        t_embed = embeddings[ModalityType.TEXT]
+        v_embed = v_embed.view(batch_size, fcnt, -1)
+        mean_embeds = []
+        for i in range(batch_size):
+            # perform mean pooling to get an 'average' representation for each video clip
+            mean_embed = torch.mean(v_embed[i, :int(torch.sum(video_mask[i]))], dim=0)
+            mean_embeds.append(mean_embed)
+        return t_embed, torch.stack(mean_embeds, dim=0), a_embed
+
     def forward(self,
                 sample1,
                 sample2,
@@ -79,14 +101,3 @@ class TVAFusion(nn.Module):
         vision1 = sample1["vision"].clone().detach().to(self.device)
         audio1 = sample1["audio"].clone().detach().to(self.device)
         token1 = tokenize(text1, device=self.device)
-
-        inputs1 = {
-            ModalityType.TEXT: token1,
-            ModalityType.VISION: vision1,
-            ModalityType.AUDIO: audio1
-        }
-        embeddings1 = self.imagebind(inputs1)
-
-        x1_t_embed = embeddings1[ModalityType.TEXT]
-        x1_v_embed = embeddings1[ModalityType.VISION]
-        x1_a_embed = embeddings1[ModalityType.AUDIO]
