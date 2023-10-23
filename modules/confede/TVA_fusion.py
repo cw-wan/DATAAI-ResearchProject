@@ -7,6 +7,7 @@ import configs.config_meld as default_config
 from modules.imagebind.data import load_and_transform_text as tokenize
 from modules.imagebind.models.imagebind_model import ModalityType
 import torch.nn.functional as F
+from pytorch_metric_learning import losses
 
 EMOTION_LABELS = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
 
@@ -74,6 +75,8 @@ class TVAFusion(nn.Module):
                                            name='TVAMonoRegClassifier', )
 
         self.criterion = nn.MSELoss()
+        self.heat = config.MELD.Downstream.const_heat
+        self.NTXent_loss = losses.NTXentLoss(temperature=self.heat)
 
         self.device = config.DEVICE
 
@@ -100,8 +103,7 @@ class TVAFusion(nn.Module):
     def forward(self,
                 sample1,
                 sample2=None,
-                return_loss=True,
-                return_embed=False):
+                return_loss=True, ):
         # read modality features and labels
         text1 = tokenize(sample1["text"], device=self.device)
         vision1 = sample1["vision"].clone().detach().to(self.device)
@@ -160,24 +162,52 @@ class TVAFusion(nn.Module):
             x_sds = torch.cat((x1_sds, x2_sds), dim=0)
             label_sds = torch.cat((label1_sds, label2_sds), dim=0)
 
+        # make multimodal prediction
+        pred = self.TVA_decoder(x_all)
+
         if return_loss:
-            # make multimodal prediction
-            pred = self.TVA_decoder(x_all)
             # make unimodal prediction
             pred_mono = self.mono_decoder(x_sds)
             # compute multimodal and unimodal loss
             pred_loss = self.criterion(pred, label_all)
             mono_loss = self.criterion(pred_mono, label_sds)
-            sup_const_loss = 0
+            # compute contrastive loss
+            contrastive_loss = 0
             if sample2 is not None:
-                pass
-            if return_embed:
-                pass
-            else:
-                pass
-            return pred_loss, mono_loss
+                # compute NT-Xent contrastive loss over 69 paris (24 positive, 45 negative) for each sample in the batch
+                # #inter-positive = 6, #intra-positive = 18
+                t1, p = torch.tensor([0, 0, 9, 9, 18, 18,
+                                      0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8], device=self.device), \
+                    torch.tensor([1, 2, 10, 11, 19, 20,
+                                  9, 18, 10, 19, 11, 20, 12, 21, 13, 22, 14, 23, 15, 24, 16, 25, 17, 26],
+                                 device=self.device)
+                # #inter-negative = 18, #intra-negative = 27
+                t2, n = torch.tensor([0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9, 18, 18, 18, 18, 18, 18,
+                                      0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8],
+                                     device=self.device), \
+                    torch.tensor([3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25, 26,
+                                  27, 36, 45, 28, 37, 46, 29, 38, 47, 30, 39, 48, 31, 40, 49, 32, 41, 50, 33, 42, 51,
+                                  34, 43, 52, 35, 44, 53], device=self.device)
+                indices_tuple = (t1, p, t2, n)
+                # for each sample, we have 2 positives and 6 negatives
+                # two vectors with the same label can form a positive pair
+                # this labels matrix is just for easier understanding
+                labels = torch.tensor([0, 0, 0, 1, 2, 3, 4, 5, 6,  # x1_t_sim[i], x2_t_sim[8*i: 8*(i+1)]
+                                       0, 0, 0, 1, 2, 3, 4, 5, 6,  # x1_v_sim[i], x2_v_sim[8*i: 8*(i+1)]
+                                       0, 0, 0, 1, 2, 3, 4, 5, 6,  # x1_a_sim[i], x2_a_sim[8*i: 8*(i+1)]
+                                       7, 7, 7, 8, 9, 10, 11, 12, 13,  # x1_t_dissim[i], x2_t_dissim[8*i: 8*(i+1)]
+                                       7, 7, 7, 8, 9, 10, 11, 12, 13,  # x1_v_dissim[i], x2_v_dissim[8*i: 8*(i+1)]
+                                       7, 7, 7, 8, 9, 10, 11, 12, 13,  # x1_a_dissim[i], x2_a_dissim[8*i: 8*(i+1)]
+                                       ])
+                for i in range(len(x1_all)):
+                    pre_sample_x = []
+                    for fea1, fea2 in zip([x1_t_sim, x1_v_sim, x1_a_sim, x1_t_dissim, x1_v_dissim, x1_a_dissim],
+                                          [x2_t_sim, x2_v_sim, x2_a_sim, x2_t_dissim, x2_v_dissim, x2_a_dissim]):
+                        pre_sample_x.append(torch.cat((fea1[i].unsqueeze(0), fea2[8 * i: 8 * (i + 1)]), dim=0))
+                    embeddings = torch.cat(pre_sample_x, dim=0)
+                    # don't need to pass in labels if you are already passing in pair/triplet indices
+                    contrastive_loss += self.NTXent_loss(embeddings=embeddings, indices_tuple=indices_tuple)
+            loss = pred_loss + 0.1 * contrastive_loss + 0.01 * mono_loss
+            return loss, pred_loss, contrastive_loss, mono_loss
         else:
-            if return_embed:
-                return x1_all
-            else:
-                return x1_t_embed, x1_v_embed, x1_a_embed
+            return pred
