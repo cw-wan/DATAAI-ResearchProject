@@ -1,1 +1,1 @@
-from .MELD_dataloader import DataloaderMELD
+from .MELD_dataloader import DatasetMELD

@@ -6,6 +6,9 @@ from torch import nn
 import configs.config_meld as default_config
 from modules.imagebind.data import load_and_transform_text as tokenize
 from modules.imagebind.models.imagebind_model import ModalityType
+import torch.nn.functional as F
+
+EMOTION_LABELS = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
 
 
 class Projector(nn.Module):
@@ -45,6 +48,9 @@ class TVAFusion(nn.Module):
             imu_drop_path=0.7,
         )
 
+        self.class_to_idx = {class_name: idx for idx, class_name in enumerate(EMOTION_LABELS)}
+        self.num_classes = len(EMOTION_LABELS)
+
         uni_fea_dim = int(encoder_fea_dim / 2)
 
         self.T_sim_proj = Projector(encoder_fea_dim, uni_fea_dim)
@@ -55,17 +61,16 @@ class TVAFusion(nn.Module):
         self.V_dissim_proj = Projector(encoder_fea_dim, uni_fea_dim)
         self.A_dissim_proj = Projector(encoder_fea_dim, uni_fea_dim)
 
-        hidden_size = [uni_fea_dim * 2, uni_fea_dim, int(uni_fea_dim / 2), int(uni_fea_dim / 4),
-                       ]
+        hidden_size = [uni_fea_dim * 2, uni_fea_dim, int(uni_fea_dim / 2), int(uni_fea_dim / 4), ]
 
         self.TVA_decoder = BaseClassifier(input_size=uni_fea_dim * 6,
                                           hidden_size=hidden_size,
-                                          output_size=1, drop_out=drop_out,
+                                          output_size=self.num_classes, drop_out=drop_out,
                                           name='TVARegClassifier', )
 
         self.mono_decoder = BaseClassifier(input_size=uni_fea_dim,
                                            hidden_size=hidden_size[2:],
-                                           output_size=1, drop_out=drop_out,
+                                           output_size=self.num_classes, drop_out=drop_out,
                                            name='TVAMonoRegClassifier', )
 
         self.criterion = nn.MSELoss()
@@ -73,11 +78,10 @@ class TVAFusion(nn.Module):
         self.device = config.DEVICE
 
     def encode(self, text, vision, video_mask, audio):
-        tokenized_text = tokenize(text, device=self.device)
         batch_size, fcnt, c, h, w = vision.shape
         vision = vision.view(batch_size * fcnt, c, h, w)
         inputs = {
-            ModalityType.TEXT: tokenized_text,
+            ModalityType.TEXT: text,
             ModalityType.VISION: vision,
             ModalityType.AUDIO: audio
         }
@@ -95,9 +99,85 @@ class TVAFusion(nn.Module):
 
     def forward(self,
                 sample1,
-                sample2,
-                return_loss=True):
-        text1 = sample1["text"]
+                sample2=None,
+                return_loss=True,
+                return_embed=False):
+        # read modality features and labels
+        text1 = tokenize(sample1["text"], device=self.device)
         vision1 = sample1["vision"].clone().detach().to(self.device)
         audio1 = sample1["audio"].clone().detach().to(self.device)
-        token1 = tokenize(text1, device=self.device)
+        label1 = [self.class_to_idx[class_name] for class_name in sample1["emotion"]]
+        label1 = F.one_hot(torch.tensor(label1), self.num_classes).to(self.device)
+
+        # encode sample 1 with imagebind
+        x1_t_embed, x1_v_embed, x1_a_embed = self.encode(text1, vision1, sample1["video_mask"], audio1)
+
+        # perform similarity and dissimilarity decomposition on embeddings of sample 1
+        x1_t_sim = self.T_sim_proj(x1_t_embed)
+        x1_v_sim = self.V_sim_proj(x1_v_embed)
+        x1_a_sim = self.A_sim_proj(x1_a_embed)
+        x1_t_dissim = self.T_dissim_proj(x1_t_embed)
+        x1_v_dissim = self.V_dissim_proj(x1_v_embed)
+        x1_a_dissim = self.A_dissim_proj(x1_a_embed)
+
+        # concatenate decomposed embeddings for multimodal and unimodal prediction
+        x1_sim = torch.cat((x1_t_sim, x1_v_sim, x1_a_sim), dim=-1)
+        x1_dissim = torch.cat((x1_t_dissim, x1_v_dissim, x1_a_dissim), dim=-1)
+        x1_all = torch.cat((x1_sim, x1_dissim), dim=-1)
+        x1_sds = torch.cat((x1_t_sim, x1_v_sim, x1_a_sim, x1_t_dissim, x1_v_dissim, x1_a_dissim), dim=0)
+
+        x_all = x1_all
+        label_all = label1
+        x_sds = x1_sds
+        label1_sds = torch.cat((label1, label1, label1, label1, label1, label1), dim=0)
+        label_sds = label1_sds
+
+        if sample2 is not None:
+            text2 = tokenize(sample2["text"], device=self.device)
+            vision2 = sample2["vision"].clone().detach().to(self.device)
+            audio2 = sample2["audio"].clone().detach().to(self.device)
+            label2 = [self.class_to_idx[class_name] for class_name in sample2["emotion"]]
+            label2 = F.one_hot(torch.tensor(label2), self.num_classes).to(self.device)
+
+            x2_t_embed, x2_v_embed, x2_a_embed = self.encode(text2, vision2, sample2["video_mask"], audio2)
+
+            x2_t_sim = self.T_sim_proj(x2_t_embed)
+            x2_v_sim = self.V_sim_proj(x2_v_embed)
+            x2_a_sim = self.A_sim_proj(x2_a_embed)
+            x2_t_dissim = self.T_dissim_proj(x2_t_embed)
+            x2_v_dissim = self.V_dissim_proj(x2_v_embed)
+            x2_a_dissim = self.A_dissim_proj(x2_a_embed)
+
+            x2_sim = torch.cat((x2_t_sim, x2_v_sim, x2_a_sim), dim=-1)
+            x2_dissim = torch.cat((x2_t_dissim, x2_v_dissim, x2_a_dissim), dim=-1)
+            x2_all = torch.cat((x2_sim, x2_dissim), dim=-1)
+            x2_sds = torch.cat((x2_t_sim, x2_v_sim, x2_a_sim, x2_t_dissim, x2_v_dissim, x2_a_dissim), dim=0)
+
+            label2_sds = torch.cat((label2, label2, label2, label2, label2, label2), dim=0)
+
+            x_all = torch.cat((x1_all, x2_all), dim=0)
+            label_all = torch.cat((label1, label2), dim=0)
+            x_sds = torch.cat((x1_sds, x2_sds), dim=0)
+            label_sds = torch.cat((label1_sds, label2_sds), dim=0)
+
+        if return_loss:
+            # make multimodal prediction
+            pred = self.TVA_decoder(x_all)
+            # make unimodal prediction
+            pred_mono = self.mono_decoder(x_sds)
+            # compute multimodal and unimodal loss
+            pred_loss = self.criterion(pred, label_all)
+            mono_loss = self.criterion(pred_mono, label_sds)
+            sup_const_loss = 0
+            if sample2 is not None:
+                pass
+            if return_embed:
+                pass
+            else:
+                pass
+            return pred_loss, mono_loss
+        else:
+            if return_embed:
+                return x1_all
+            else:
+                return x1_t_embed, x1_v_embed, x1_a_embed

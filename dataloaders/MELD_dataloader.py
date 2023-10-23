@@ -1,5 +1,5 @@
 import os
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from utils import VideoLoader
 import pandas as pd
 import pickle
@@ -12,7 +12,7 @@ logging.basicConfig(filename="dataloader.log",
                     level=logging.WARNING)
 
 
-class DataloaderMELD(Dataset):
+class DatasetMELD(Dataset):
     def __init__(self,
                  path,
                  subset,
@@ -66,3 +66,8 @@ class DataloaderMELD(Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx]
+
+
+def dataloaderMELD(datapath, subset, batch_size, shuffle=True):
+    dataset = DatasetMELD(datapath, subset)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)

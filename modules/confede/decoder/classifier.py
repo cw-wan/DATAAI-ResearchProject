@@ -1,4 +1,4 @@
-# https://github.com/XpastaX/ConFEDE/blob/Graph_Main/MOSI/model/decoder/classifier.py
+# Adapted from https://github.com/XpastaX/ConFEDE/blob/Graph_Main/MOSI/model/decoder/classifier.py
 import torch.nn as nn
 
 
@@ -19,6 +19,9 @@ class BaseClassifier(nn.Module):
 
         self.MLP = nn.Sequential(*ModuleList)
 
+        self.softmax = nn.Softmax(dim=1)
+
     def forward(self, x):
         x = self.MLP(x)
+        x = self.softmax(x)
         return x

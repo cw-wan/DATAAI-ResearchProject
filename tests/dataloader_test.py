@@ -1,6 +1,6 @@
-from dataloaders import DataloaderMELD
+from dataloaders import DatasetMELD
 
 # load dev
-dataloader = DataloaderMELD('../data/MELD', 'train')
+dataloader = DatasetMELD('../data/MELD', 'dev')
 
 print(dataloader[2])
