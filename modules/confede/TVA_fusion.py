@@ -207,6 +207,7 @@ class TVAFusion(nn.Module):
                     embeddings = torch.cat(pre_sample_x, dim=0)
                     # don't need to pass in labels if you are already passing in pair/triplet indices
                     contrastive_loss += self.NTXent_loss(embeddings=embeddings, indices_tuple=indices_tuple)
+                contrastive_loss /= len(x1_all)
             loss = pred_loss + 0.1 * contrastive_loss + 0.01 * mono_loss
             return loss, pred_loss, contrastive_loss, mono_loss
         else:
