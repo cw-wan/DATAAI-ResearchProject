@@ -10,3 +10,9 @@ class MELD:
 
     class Downstream:
         const_heat = 0.5
+
+        batch_size = 16
+        lr = 1e-4
+        epoch = 25
+        decay = 1e-3
+        num_warm_up = 1

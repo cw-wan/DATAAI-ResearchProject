@@ -1,18 +1,12 @@
-from dataloaders import DatasetMELD
-from torch.utils.data import DataLoader
+from dataloaders.MELD_dataloader import dataloaderMELD
 from modules.confede.TVA_fusion import TVAFusion
 import torch
+from utils.training import eval_tva_fusion
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-# load dev
-meld = DatasetMELD('../data/MELD', 'dev')
-
-dev_dataloader = DataLoader(meld, batch_size=1, shuffle=True)
-dev_dataloader2 = DataLoader(meld, batch_size=8, shuffle=True)
-
-sample = next(iter(dev_dataloader))
-sample2 = next(iter(dev_dataloader2))
+# load train
+train_dataloader = dataloaderMELD(datapath="../data/MELD", subset="dev", batch_size=10, shuffle=True)
 
 # load model
 model = TVAFusion()
@@ -20,9 +14,5 @@ model.config.MELD.Path.checkpoints_path = '../checkpoints/'
 model.load_model(load_pretrain=True)
 model.to(device)
 
-pred_result, loss, pred_loss, c_loss, mono_loss = model(sample, sample2=sample2)
-print(pred_result)
-print(loss)
-print(pred_loss)
-print(c_loss)
-print(mono_loss)
+acc, f1 = eval_tva_fusion(model)
+print(acc, f1)

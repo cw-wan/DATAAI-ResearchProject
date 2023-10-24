@@ -1,5 +1,4 @@
 import os
-
 import torch
 from torch.utils.data import Dataset, DataLoader
 from utils import VideoLoader
@@ -78,6 +77,10 @@ class DatasetMELD(Dataset):
         self.sim_matrix = matrix
 
     def sample(self, idx):
+        """
+        Implementation of ConFEDE sampling algorithm.
+        :param idx: list of sample1 data ids
+        """
         z = int(len(self.data) / 4)
         samples = {}
         for key in self.data[0].keys():
