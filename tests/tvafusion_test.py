@@ -14,14 +14,14 @@ dev_dataloader2 = DataLoader(meld, batch_size=8, shuffle=True)
 sample = next(iter(dev_dataloader))
 sample2 = next(iter(dev_dataloader2))
 
-print(sample["emotion"])
-print(sample2["emotion"])
-
 # load model
 model = TVAFusion()
+model.config.MELD.Path.checkpoints_path = '../checkpoints/'
+model.load_model(load_pretrain=True)
 model.to(device)
 
-loss, pred_loss, c_loss, mono_loss = model(sample, sample2=sample2)
+pred_result, loss, pred_loss, c_loss, mono_loss = model(sample, sample2=sample2)
+print(pred_result)
 print(loss)
 print(pred_loss)
 print(c_loss)

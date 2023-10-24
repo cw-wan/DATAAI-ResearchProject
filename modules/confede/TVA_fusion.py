@@ -1,4 +1,5 @@
 # Adapted from https://github.com/XpastaX/ConFEDE/blob/Graph_Main/MOSI/model/net/constrastive/TVA_fusion.py
+import os
 import torch
 from modules.confede.decoder.classifier import BaseClassifier
 from modules.imagebind.models.imagebind_model import ImageBindModel
@@ -48,6 +49,8 @@ class TVAFusion(nn.Module):
             audio_drop_path=0.1,
             imu_drop_path=0.7,
         )
+
+        self.config = config
 
         self.class_to_idx = {class_name: idx for idx, class_name in enumerate(EMOTION_LABELS)}
         self.num_classes = len(EMOTION_LABELS)
@@ -164,6 +167,7 @@ class TVAFusion(nn.Module):
 
         # make multimodal prediction
         pred = self.TVA_decoder(x_all)
+        pred_result = torch.argmax(pred, dim=-1)
 
         if return_loss:
             # make unimodal prediction
@@ -209,6 +213,20 @@ class TVAFusion(nn.Module):
                     contrastive_loss += self.NTXent_loss(embeddings=embeddings, indices_tuple=indices_tuple)
                 contrastive_loss /= len(x1_all)
             loss = pred_loss + 0.1 * contrastive_loss + 0.01 * mono_loss
-            return loss, pred_loss, contrastive_loss, mono_loss
+            return pred_result, loss, pred_loss, contrastive_loss, mono_loss
         else:
-            return pred
+            return pred_result, x1_t_embed, x1_v_embed, x1_a_embed
+
+    def load_model(self, load_pretrain=False, load_checkpoint_epoch=None):
+        if load_pretrain:
+            encoder_path = os.path.join(self.config.MELD.Path.checkpoints_path, 'imagebind_huge.pth')
+            self.imagebind.load_state_dict(torch.load(encoder_path))
+        else:
+            checkpoint_path = os.path.join(self.config.MELD.Path.checkpoints_path,
+                                           'TVA_fusion_' + str(load_checkpoint_epoch) + '.pth')
+            self.load_state_dict(torch.load(checkpoint_path))
+
+    def save_model(self, epoch=None):
+        model_path = self.model_path + 'TVA_fusion_' + str(epoch) + '.pth'
+        print("Model saved at {}".format(model_path))
+        torch.save(self.state_dict(), model_path)

@@ -1,15 +1,20 @@
 import os
+
+import torch
 from torch.utils.data import Dataset, DataLoader
 from utils import VideoLoader
 import pandas as pd
 import pickle
 import logging
+import numpy as np
 
 logging.basicConfig(filename="dataloader.log",
                     filemode='a',
                     format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
                     datefmt='%H:%M:%S',
                     level=logging.WARNING)
+
+np.random.seed(64)
 
 
 class DatasetMELD(Dataset):
@@ -32,9 +37,9 @@ class DatasetMELD(Dataset):
             csv_data = pd.read_csv(csv_path)
             csv_data = csv_data.loc[:, ["Utterance", "Speaker", "Emotion", "Sentiment", "Dialogue_ID", "Utterance_ID"]]
             self.data = []
-            idx = 0
-            for _, row in csv_data.iterrows():
+            for idx, row in csv_data.iterrows():
                 utt = dict()
+                utt["index"] = idx
                 utt["text"] = row["Utterance"]
                 utt["speaker"] = row["Speaker"]
                 utt["emotion"] = row["Emotion"]
@@ -51,8 +56,8 @@ class DatasetMELD(Dataset):
                         logging.warning("{} {} {}".format(subset, video, e))
                 else:
                     logging.warning("{} {} NOT FOUND".format(subset, video))
-                idx += 1
-                print("\rPreprocessing MELD {} {}%".format(subset, round(100.0 * idx / csv_data.shape[0], 2)), end="")
+                print("\rPreprocessing MELD {} {}%".format(subset, round(100.0 * (idx + 1) / csv_data.shape[0], 2)),
+                      end="")
             print("\nSaving and loading MELD ...")
             with open(self.data_path, "wb") as f:
                 pickle.dump(self.data, f)
@@ -60,12 +65,44 @@ class DatasetMELD(Dataset):
             print("Loading MELD " + subset + " ...")
             with open(self.data_path, "rb") as f:
                 self.data = pickle.load(f)
+        # sim_matrix[i, j]: cosine similarity between data[i] and data[j]
+        self.sim_matrix = np.zeros((len(self.data), len(self.data)))
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         return self.data[idx]
+
+    def update_matrix(self, matrix):
+        self.sim_matrix = matrix
+
+    def sample(self, idx):
+        z = int(len(self.data) / 4)
+        samples = {}
+        for key in self.data[0].keys():
+            samples[key] = []
+        for i in idx:
+            sorted_idx = np.argsort(self.sim_matrix[i, :])
+            similar_sample_set = []
+            dissimilar_sample_set = []
+            for j in sorted_idx:
+                if i == j:
+                    continue
+                if self.data[i]["emotion"] == self.data[j]["emotion"]:
+                    similar_sample_set.append(j)
+                else:
+                    dissimilar_sample_set.append(j)
+            neighbour = np.random.permutation(similar_sample_set[-z:])[:2]
+            outlier1 = np.random.permutation(dissimilar_sample_set[:z])[:3]
+            outlier2 = np.random.permutation(dissimilar_sample_set[-z:])[:3]
+            samples_idx = np.concatenate((neighbour, outlier1, outlier2))
+            for _id in samples_idx:
+                for key in samples.keys():
+                    samples[key].append(self.data[_id][key])
+        for key in ["vision", "video_mask", "audio"]:
+            samples[key] = torch.stack(samples[key])
+        return samples
 
 
 def dataloaderMELD(datapath, subset, batch_size, shuffle=True):
