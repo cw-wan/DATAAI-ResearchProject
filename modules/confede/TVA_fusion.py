@@ -161,9 +161,9 @@ class TVAFusion(nn.Module):
             label2_sds = torch.cat((label2, label2, label2, label2, label2, label2), dim=0)
 
             x_all = torch.cat((x1_all, x2_all), dim=0)
-            label_all = torch.cat((label1, label2), dim=0)
+            label_all = torch.cat((label1, label2), dim=0).float()
             x_sds = torch.cat((x1_sds, x2_sds), dim=0)
-            label_sds = torch.cat((label1_sds, label2_sds), dim=0)
+            label_sds = torch.cat((label1_sds, label2_sds), dim=0).float()
 
         # make multimodal prediction
         pred = self.TVA_decoder(x_all)

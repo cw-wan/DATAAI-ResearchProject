@@ -36,9 +36,9 @@ class DatasetMELD(Dataset):
             csv_data = pd.read_csv(csv_path)
             csv_data = csv_data.loc[:, ["Utterance", "Speaker", "Emotion", "Sentiment", "Dialogue_ID", "Utterance_ID"]]
             self.data = []
-            for idx, row in csv_data.iterrows():
+            idx = 0
+            for _i, row in csv_data.iterrows():
                 utt = dict()
-                utt["index"] = idx
                 utt["text"] = row["Utterance"]
                 utt["speaker"] = row["Speaker"]
                 utt["emotion"] = row["Emotion"]
@@ -50,12 +50,14 @@ class DatasetMELD(Dataset):
                 if os.path.exists(video):
                     try:
                         utt["vision"], utt["video_mask"], utt["audio"] = videoloader.load(video)
+                        utt["index"] = idx
+                        idx += 1
                         self.data.append(utt)
                     except Exception as e:
                         logging.warning("{} {} {}".format(subset, video, e))
                 else:
                     logging.warning("{} {} NOT FOUND".format(subset, video))
-                print("\rPreprocessing MELD {} {}%".format(subset, round(100.0 * (idx + 1) / csv_data.shape[0], 2)),
+                print("\rPreprocessing MELD {} {}%".format(subset, round(100.0 * (_i + 1) / csv_data.shape[0], 2)),
                       end="")
             print("\nSaving and loading MELD ...")
             with open(self.data_path, "wb") as f:
