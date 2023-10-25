@@ -227,6 +227,6 @@ class TVAFusion(nn.Module):
             self.load_state_dict(torch.load(checkpoint_path))
 
     def save_model(self, epoch=None):
-        model_path = self.model_path + 'TVA_fusion_' + str(epoch) + '.pth'
+        model_path = os.path.join(self.config.MELD.Path.checkpoints_path, 'TVA_fusion_' + str(epoch) + '.pth')
         print("Model saved at {}".format(model_path))
         torch.save(self.state_dict(), model_path)
