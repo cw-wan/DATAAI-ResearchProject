@@ -128,3 +128,28 @@ def train_tva_fusion():
         write_log(log, path='TVA_Fusion_train.log')
         if epoch % save_period == 0:
             model.save_model(epoch=epoch)
+
+
+def test_tva_fusion(model):
+    emotion_labels = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
+    class_to_idx = {class_name: idx for idx, class_name in enumerate(emotion_labels)}
+    with torch.no_grad():
+        model.eval()
+        eval_data = dataloaderMELD(datapath=config_meld.MELD.Path.raw_data_path,
+                                   subset="test",
+                                   batch_size=32,
+                                   shuffle=False)
+        pred = []
+        truth = []
+        bar = tqdm(eval_data)
+        for index, sample in enumerate(bar):
+            label = [class_to_idx[class_name] for class_name in sample["emotion"]]
+            truth.append(np.array(label))
+            pred_result, _, _, _ = model(sample, return_loss=False)
+            pred_result = pred_result.to(torch.device('cpu'))
+            pred.append(pred_result.numpy())
+        pred = np.concatenate(pred)
+        truth = np.concatenate(truth)
+        acc = accuracy_score(truth, pred)
+        wf1 = f1_score(truth, pred, labels=np.arange(7), average='weighted')
+    return acc, wf1

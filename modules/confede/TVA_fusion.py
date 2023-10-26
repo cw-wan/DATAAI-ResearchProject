@@ -217,10 +217,15 @@ class TVAFusion(nn.Module):
         else:
             return pred_result, x1_t_embed, x1_v_embed, x1_a_embed
 
+    def freeze_imagebind(self):
+        for name, param in self.imagebind.named_parameters():
+            if 'adapters' not in name:
+                param.requires_grad = False
+
     def load_model(self, load_pretrain=False, load_checkpoint_epoch=None):
         if load_pretrain:
             encoder_path = os.path.join(self.config.MELD.Path.checkpoints_path, 'imagebind_huge.pth')
-            self.imagebind.load_state_dict(torch.load(encoder_path))
+            self.imagebind.load_state_dict(torch.load(encoder_path), strict=False)
         else:
             checkpoint_path = os.path.join(self.config.MELD.Path.checkpoints_path,
                                            'TVA_fusion_' + str(load_checkpoint_epoch) + '.pth')

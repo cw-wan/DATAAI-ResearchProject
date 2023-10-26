@@ -18,24 +18,50 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, trunc_normal_
+from configs import config_adapter
+import torch.nn.functional as F
+
+
+class Adapter(nn.Module):
+    def __init__(self, d):
+        super().__init__()
+
+        m = config_adapter.Adapter.adapter_size
+
+        self.down_project = nn.Linear(d, m)
+        self.up_project = nn.Linear(m, d)
+
+        # init weights
+        nn.init.normal_(self.down_project.weight, mean=0.0, std=config_adapter.Adapter.initializer_range)
+        nn.init.normal_(self.up_project.weight, mean=0.0, std=config_adapter.Adapter.initializer_range)
+        nn.init.constant_(self.down_project.bias, val=0.0)
+        nn.init.constant_(self.up_project.bias, val=0.0)
+
+    def forward(self, x):
+        x_origin = x
+        x = self.down_project(x)
+        x = F.sigmoid(x)
+        x = self.up_project(x)
+        x = x_origin + x
+        return x
 
 
 class Attention(nn.Module):
     def __init__(
-        self,
-        dim,
-        num_heads=8,
-        qkv_bias=False,
-        qk_scale=None,
-        attn_drop=0.0,
-        proj_drop=0.0,
+            self,
+            dim,
+            num_heads=8,
+            qkv_bias=False,
+            qk_scale=None,
+            attn_drop=0.0,
+            proj_drop=0.0,
     ):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
         # NOTE scale factor was wrong in my original version,
         # can set manually to be compat with prev weights
-        self.scale = qk_scale or head_dim**-0.5
+        self.scale = qk_scale or head_dim ** -0.5
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -67,12 +93,12 @@ class Attention(nn.Module):
 
 class Mlp(nn.Module):
     def __init__(
-        self,
-        in_features,
-        hidden_features=None,
-        out_features=None,
-        act_layer=nn.GELU,
-        drop=0.0,
+            self,
+            in_features,
+            hidden_features=None,
+            out_features=None,
+            act_layer=nn.GELU,
+            drop=0.0,
     ):
         super().__init__()
         out_features = out_features or in_features
@@ -104,16 +130,17 @@ class ViTAttention(Attention):
 
 class BlockWithMasking(nn.Module):
     def __init__(
-        self,
-        dim: int,
-        attn_target: Callable,
-        mlp_ratio: int = 4,
-        act_layer: Callable = nn.GELU,
-        norm_layer: Callable = nn.LayerNorm,
-        ffn_dropout_rate: float = 0.0,
-        drop_path: float = 0.0,
-        layer_scale_type: Optional[str] = None,
-        layer_scale_init_value: float = 1e-4,
+            self,
+            dim: int,
+            attn_target: Callable,
+            mlp_ratio: int = 4,
+            act_layer: Callable = nn.GELU,
+            norm_layer: Callable = nn.LayerNorm,
+            ffn_dropout_rate: float = 0.0,
+            drop_path: float = 0.0,
+            layer_scale_type: Optional[str] = None,
+            layer_scale_init_value: float = 1e-4,
+            adapter: bool = False
     ):
         super().__init__()
 
@@ -134,6 +161,12 @@ class BlockWithMasking(nn.Module):
             drop=ffn_dropout_rate,
         )
         self.norm_2 = norm_layer(dim)
+        self.adapter = adapter
+        if adapter:
+            self.adapters = nn.ModuleList([
+                Adapter(dim),
+                Adapter(dim)
+            ])
         self.layer_scale_type = layer_scale_type
         if self.layer_scale_type is not None:
             assert self.layer_scale_type in [
@@ -157,17 +190,30 @@ class BlockWithMasking(nn.Module):
             )
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor):
-        if self.layer_scale_type is None:
-            x = x + self.drop_path(self.attn(self.norm_1(x), attn_mask))
-            x = x + self.drop_path(self.mlp(self.norm_2(x)))
+        if self.adapter:
+            if self.layer_scale_type is None:
+                x = x + self.drop_path(self.adapters[0](self.attn(self.norm_1(x), attn_mask)))
+                x = x + self.drop_path(self.adapters[1](self.mlp(self.norm_2(x))))
+            else:
+                x = (
+                        x
+                        + self.drop_path(self.adapters[0](self.attn(self.norm_1(x), attn_mask)))
+                        * self.layer_scale_gamma1
+                )
+                x = x + self.drop_path(self.adapters[1](self.mlp(self.norm_2(x)))) * self.layer_scale_gamma2
+            return x
         else:
-            x = (
-                x
-                + self.drop_path(self.attn(self.norm_1(x), attn_mask))
-                * self.layer_scale_gamma1
-            )
-            x = x + self.drop_path(self.mlp(self.norm_2(x))) * self.layer_scale_gamma2
-        return x
+            if self.layer_scale_type is None:
+                x = x + self.drop_path(self.attn(self.norm_1(x), attn_mask))
+                x = x + self.drop_path(self.mlp(self.norm_2(x)))
+            else:
+                x = (
+                        x
+                        + self.drop_path(self.attn(self.norm_1(x), attn_mask))
+                        * self.layer_scale_gamma1
+                )
+                x = x + self.drop_path(self.mlp(self.norm_2(x))) * self.layer_scale_gamma2
+            return x
 
 
 _LAYER_NORM = partial(nn.LayerNorm, eps=1e-6)
@@ -175,21 +221,21 @@ _LAYER_NORM = partial(nn.LayerNorm, eps=1e-6)
 
 class SimpleTransformer(nn.Module):
     def __init__(
-        self,
-        attn_target: Callable,
-        embed_dim: int,
-        num_blocks: int,
-        block: Callable = BlockWithMasking,
-        pre_transformer_layer: Optional[Callable] = None,
-        post_transformer_layer: Optional[Callable] = None,
-        drop_path_rate: float = 0.0,
-        drop_path_type: str = "progressive",
-        norm_layer: Callable = _LAYER_NORM,
-        mlp_ratio: int = 4,
-        ffn_dropout_rate: float = 0.0,
-        layer_scale_type: Optional[str] = None,  # from cait; possible values are None, "per_channel", "scalar"
-        layer_scale_init_value: float = 1e-4,  # from cait; float
-        weight_init_style: str = "jax",  # possible values jax or pytorch
+            self,
+            attn_target: Callable,
+            embed_dim: int,
+            num_blocks: int,
+            block: Callable = BlockWithMasking,
+            pre_transformer_layer: Optional[Callable] = None,
+            post_transformer_layer: Optional[Callable] = None,
+            drop_path_rate: float = 0.0,
+            drop_path_type: str = "progressive",
+            norm_layer: Callable = _LAYER_NORM,
+            mlp_ratio: int = 4,
+            ffn_dropout_rate: float = 0.0,
+            layer_scale_type: Optional[str] = None,  # from cait; possible values are None, "per_channel", "scalar"
+            layer_scale_init_value: float = 1e-4,  # from cait; float
+            weight_init_style: str = "jax",  # possible values jax or pytorch
     ):
         """
         Simple Transformer with the following features
@@ -219,13 +265,14 @@ class SimpleTransformer(nn.Module):
                     norm_layer=norm_layer,
                     layer_scale_type=layer_scale_type,
                     layer_scale_init_value=layer_scale_init_value,
+                    adapter=True if i + 1 >= num_blocks - config_adapter.Adapter.layers else False
                 )
                 for i in range(num_blocks)
             ]
         )
         self.post_transformer_layer = post_transformer_layer
         self.weight_init_style = weight_init_style
-        self.apply(self._init_weights)
+        # self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -243,12 +290,12 @@ class SimpleTransformer(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(
-        self,
-        tokens: torch.Tensor,
-        attn_mask: torch.Tensor = None,
-        use_checkpoint: bool = False,
-        checkpoint_every_n: int = 1,
-        checkpoint_blk_ids: Optional[List[int]] = None,
+            self,
+            tokens: torch.Tensor,
+            attn_mask: torch.Tensor = None,
+            use_checkpoint: bool = False,
+            checkpoint_every_n: int = 1,
+            checkpoint_blk_ids: Optional[List[int]] = None,
     ):
         """
         Inputs
