@@ -265,7 +265,7 @@ class SimpleTransformer(nn.Module):
                     norm_layer=norm_layer,
                     layer_scale_type=layer_scale_type,
                     layer_scale_init_value=layer_scale_init_value,
-                    adapter=True if i + 1 >= num_blocks - config_adapter.Adapter.layers else False
+                    adapter=True if i >= num_blocks - config_adapter.Adapter.layers else False
                 )
                 for i in range(num_blocks)
             ]
