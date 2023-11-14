@@ -20,7 +20,7 @@ class DatasetMELD(Dataset):
     def __init__(self,
                  path,
                  subset,
-                 fcnt=4,
+                 fcnt=3,
                  fps=1):
         self.path = {
             'train': os.path.join(path, 'train'),
