@@ -257,6 +257,7 @@ def train_projectors():
             bar.set_description("Epoch:%d|Loss:%s" % (epoch, loss))
 
             vision = sample["vision"].clone().detach().to(device)
+            batch_size, fcnt, c, h, w = vision.shape
             video_mask = sample["video_mask"]
             emotion = sample["emotion"]
             speaker = sample["speaker"]
@@ -269,7 +270,6 @@ def train_projectors():
                 text_gesture = "The gesture of " + speaker[i] + " suggests " + emotion[i]
                 text.append(text_gesture)
             text = tokenize_imagebind(text, device=device)
-            batch_size, fcnt, c, h, w = vision.shape
             vision = vision.view(batch_size * fcnt, c, h, w)
             inputs = {
                 ModalityType.TEXT: text,
