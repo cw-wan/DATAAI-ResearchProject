@@ -285,6 +285,7 @@ def train_projectors():
             similarity_matrix = torch.zeros((batch_size * 2, batch_size * 2)).to(device)
             t_embed /= t_embed.norm(dim=-1, keepdim=True)
             v_embed /= v_embed.norm(dim=-1, keepdim=True)
+            # RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [128, 1024]], which is output 0 of DivBackward0, is at version 1; expected version 0 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
             for i in range(batch_size * 2):
                 for j in range(batch_size * 2):
                     similarity_matrix[i][j] = torch.max(t_embed[i] @ v_embed[j, :int(torch.sum(video_mask[int(j / 2)]))].T)
