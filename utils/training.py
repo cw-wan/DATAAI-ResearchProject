@@ -1,14 +1,19 @@
 from modules.confede.TVA_fusion import TVAFusion
 from modules.baseline.baseline_model import Baseline
 from dataloaders.MELD_dataloader import dataloaderMELD
-from configs import config_meld, config_baseline
+from configs import config_meld, config_baseline, config_projectors
+from modules.imagebind.models.imagebind_model import ImageBindModel, ModalityType
+from modules.projectors.projectors_model import Projectors
+from modules.imagebind.data import load_and_transform_text as tokenize_imagebind
 import torch
 import transformers
 from tqdm import tqdm
 import numpy as np
+import os
+from torch import nn
+import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, f1_score
 from utils.common import write_log
-
 
 EMOTION_LABELS = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
 
@@ -28,11 +33,22 @@ def build_baseline(epoch):
     return model
 
 
-
 MODEL_BUILDER = {
     "TVA_Fusion": build_tva_fusion,
     "Baseline": build_baseline
 }
+
+
+class CrossEn(nn.Module):
+    def __init__(self, ):
+        super(CrossEn, self).__init__()
+
+    def forward(self, sim_matrix):
+        logpt = F.log_softmax(sim_matrix, dim=-1)
+        logpt = torch.diag(logpt)
+        nce_loss = -logpt
+        sim_loss = nce_loss.mean()
+        return sim_loss
 
 
 def _update_matrix(dataloader, model):
@@ -189,6 +205,99 @@ def train_baseline():
         print(log)
         write_log(log, path='baseline_train.log')
         model.save_model(epoch=epoch)
+
+
+def train_projectors():
+    device = config_projectors.DEVICE
+    # load and freeze imagebind
+    imagebind = ImageBindModel(
+        vision_embed_dim=1280,
+        vision_num_blocks=32,
+        vision_num_heads=16,
+        text_embed_dim=1024,
+        text_num_blocks=24,
+        text_num_heads=16,
+        out_embed_dim=1024,
+        audio_drop_path=0.1,
+        imu_drop_path=0.7,
+    )
+    encoder_path = os.path.join(config_meld.MELD.Path.checkpoints_path, 'imagebind_huge.pth')
+    imagebind.load_state_dict(torch.load(encoder_path), strict=False)
+    for name, param in imagebind.named_parameters():
+        param.requires_grad = False
+    imagebind.to(device)
+    imagebind.eval()
+    # init projectors
+    projectors = Projectors()
+
+    batch_size = config_projectors.MELD.Downstream.batch_size
+    lr = config_projectors.MELD.Downstream.lr
+    total_epoch = config_projectors.MELD.Downstream.epoch
+    num_warm_up = config_projectors.MELD.Downstream.num_warm_up
+
+    train_dataloader = dataloaderMELD(datapath=config_projectors.MELD.Path.raw_data_path,
+                                      subset="train",
+                                      batch_size=batch_size,
+                                      shuffle=True)
+
+    optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, projectors.parameters()), lr=lr,
+                                  amsgrad=False, )
+    scheduler = transformers.optimization.get_linear_schedule_with_warmup(optimizer,
+                                                                          num_warmup_steps=int(
+                                                                              num_warm_up * (len(train_dataloader))),
+                                                                          num_training_steps=total_epoch * len(
+                                                                              train_dataloader), )
+    projectors.to(device)
+
+    loss = 0.0
+    for epoch in range(1, total_epoch + 1):
+        projectors.train()
+        bar = tqdm(train_dataloader)
+        for index, sample, in enumerate(bar):
+            bar.set_description("Epoch:%d|Loss:%s" % (epoch, loss))
+
+            vision = sample["vision"].clone().detach().to(device)
+            video_mask = sample["video_mask"]
+            emotion = sample["emotion"]
+            speaker = sample["speaker"]
+            text = []
+            for i in range(batch_size):
+                # prompting template
+                text_facial_expression = "The facial expression of " + speaker[i] + " suggests " + emotion[i]
+                text.append(text_facial_expression)
+            for i in range(batch_size):
+                text_gesture = "The gesture of " + speaker[i] + " suggests " + emotion[i]
+                text.append(text_gesture)
+            text = tokenize_imagebind(text, device=device)
+            batch_size, fcnt, c, h, w = vision.shape
+            vision = vision.view(batch_size * fcnt, c, h, w)
+            inputs = {
+                ModalityType.TEXT: text,
+                ModalityType.VISION: vision,
+            }
+            embeddings = imagebind(inputs)
+            v_embed = embeddings[ModalityType.VISION]
+            t_embed = embeddings[ModalityType.TEXT]
+            v_embed_facial, v_embed_gesture = projectors(v_embed)
+            v_embed = torch.cat((v_embed_facial, v_embed_gesture), dim=0)
+            v_embed = v_embed.view(batch_size * 2, fcnt, -1)
+            # compute similarity matrix
+            similarity_matrix = torch.zeros((batch_size * 2, batch_size * 2)).to(device)
+            t_embed /= t_embed.norm(dim=-1, keepdim=True)
+            v_embed /= v_embed.norm(dim=-1, keepdim=True)
+            for i in range(batch_size * 2):
+                for j in range(batch_size * 2):
+                    similarity_matrix[i][j] = torch.max(t_embed[i] @ v_embed[j, :int(torch.sum(video_mask[int(j / 2)]))].T)
+            # compute loss
+            cross_entropy_loss = CrossEn()
+            loss = (cross_entropy_loss(similarity_matrix) + cross_entropy_loss(similarity_matrix.T)) / 2
+            # back prop
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+        # save model
+        projectors.save_model(epoch=epoch)
 
 
 def test(model, epoch):

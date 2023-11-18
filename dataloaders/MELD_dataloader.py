@@ -68,6 +68,11 @@ class DatasetMELD(Dataset):
                 self.data = pickle.load(f)
         # sim_matrix[i, j]: cosine similarity between data[i] and data[j]
         self.sim_matrix = np.zeros((len(self.data), len(self.data)))
+        self.emotion2idx = {
+            "anger": [], "disgust": [], "fear": [], "joy": [], "neutral": [], "sadness": [], "surprise": []
+        }
+        for item in self.data:
+            self.emotion2idx[item["emotion"]].append(item["index"])
 
     def __len__(self):
         return len(self.data)
@@ -108,6 +113,9 @@ class DatasetMELD(Dataset):
         for key in ["vision", "video_mask", "audio"]:
             samples[key] = torch.stack(samples[key])
         return samples
+
+    def negative_samples(self, idx):
+        pass
 
 
 def dataloaderMELD(datapath, subset, batch_size, shuffle=True):
