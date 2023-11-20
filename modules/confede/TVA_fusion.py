@@ -1,7 +1,7 @@
 # Adapted from https://github.com/XpastaX/ConFEDE/blob/Graph_Main/MOSI/model/net/constrastive/TVA_fusion.py
 import os
 import torch
-from modules.confede.decoder.classifier import BaseClassifier
+from modules.decoder.classifier import BaseClassifier
 from modules.imagebind.models.imagebind_model import ImageBindModel
 from torch import nn
 import configs.config_meld as default_config

@@ -7,6 +7,7 @@ class MELD:
     class Path:
         checkpoints_path = 'checkpoints/'
         raw_data_path = 'data/MELD'
+        projectors_path = 'checkpoints/projectors_3.pth'
 
     class Downstream:
         batch_size = 16

@@ -1,10 +1,11 @@
 from modules.confede.TVA_fusion import TVAFusion
 from modules.baseline.baseline_model import Baseline
 from dataloaders.MELD_dataloader import dataloaderMELD
-from configs import config_meld, config_baseline, config_projectors
+from configs import config_meld, config_baseline, config_projectors, naive_roberta_config
 from modules.imagebind.models.imagebind_model import ImageBindModel, ModalityType
 from modules.projectors.projectors_model import Projectors
 from modules.imagebind.data import load_and_transform_text as tokenize_imagebind
+from modules.naive_roberta.model import NaiveRoBERTa
 import torch
 import transformers
 from tqdm import tqdm
@@ -290,7 +291,8 @@ def train_projectors():
             # RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [128, 1024]], which is output 0 of DivBackward0, is at version 1; expected version 0 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
             for i in range(batch_size * 2):
                 for j in range(batch_size * 2):
-                    similarity_matrix[i][j] = torch.max(t_embed[i] @ v_embed[j, :int(torch.sum(video_mask[int(j / 2)]))].T)
+                    similarity_matrix[i][j] = torch.max(
+                        t_embed[i] @ v_embed[j, :int(torch.sum(video_mask[int(j / 2)]))].T)
             # compute loss
             cross_entropy_loss = CrossEn()
             loss = (cross_entropy_loss(similarity_matrix) + cross_entropy_loss(similarity_matrix.T)) / 2
@@ -340,3 +342,139 @@ def test(model, epoch):
     log = "Test Epoch {}, Accuracy {}, F1 Score {}".format(epoch, acc, wf1)
     print(log)
     print(confusion_matrix)
+
+
+def eval_naive_roberta(model):
+    class_to_idx = {class_name: idx for idx, class_name in enumerate(EMOTION_LABELS)}
+    with torch.no_grad():
+        model.eval()
+        eval_dataloader = dataloaderMELD(datapath=naive_roberta_config.Path.data, subset="dev", batch_size=32,
+                                         shuffle=False)
+        predictions = []
+        truths = []
+        bar = tqdm(eval_dataloader)
+        for index, sample in enumerate(bar):
+            label = [class_to_idx[class_name] for class_name in sample["emotion"]]
+            truths.append(np.array(label))
+            pred = model(sample, return_loss=False)
+            pred = torch.argmax(pred, dim=-1)
+            predictions.append(pred.cpu().detach().numpy())
+        predictions = np.concatenate(predictions)
+        truths = np.concatenate(truths)
+        print(predictions)
+        print(truths)
+        acc = accuracy_score(truths, predictions)
+        f1 = f1_score(truths, predictions, labels=np.arange(7), average='weighted')
+    return acc, f1
+
+
+def train_naive_roberta():
+    device = naive_roberta_config.device
+    # load training parameters
+    batch_size = naive_roberta_config.DownStream.batch_size
+    learning_rate = naive_roberta_config.DownStream.learning_rate
+    warm_up = naive_roberta_config.DownStream.warm_up
+    total_epoch = naive_roberta_config.DownStream.total_epoch
+    decay = naive_roberta_config.DownStream.decay
+
+    # init model
+    model = NaiveRoBERTa()
+    model.to(device)
+
+    # init dataloader
+    train_dataloader = dataloaderMELD(datapath=naive_roberta_config.Path.data, subset="train",
+                                      batch_size=32,
+                                      shuffle=False)
+
+    # weight decay
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_params = [
+        {
+            "params": [p for n, p in model.named_parameters() if
+                       p.requires_grad and not any(nd in n for nd in no_decay)],
+            "weight_decay": decay,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if p.requires_grad and any(nd in n for nd in no_decay)],
+            "weight_decay": 0.0,
+        },
+    ]
+
+    # init optimizer
+    optimizer = torch.optim.AdamW(params=optimizer_grouped_params, lr=learning_rate, amsgrad=False)
+    scheduler = transformers.optimization.get_linear_schedule_with_warmup(optimizer,
+                                                                          num_warmup_steps=int(
+                                                                              warm_up * (len(train_dataloader))),
+                                                                          num_training_steps=total_epoch * len(
+                                                                              train_dataloader), )
+
+    # train
+    loss = 0
+    acc, f1 = eval_naive_roberta(model)
+    print("Before training, Accuracy {}, F1 Score {}".format(acc, f1))
+    for epoch in range(1, total_epoch + 1):
+        model.train()
+        bar = tqdm(train_dataloader)
+        for index, sample, in enumerate(bar):
+            bar.set_description("Epoch:%d|Loss:%s" % (epoch, loss))
+            loss, pred = model(sample)
+            # back prop
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+        # evaluate
+        acc, f1 = eval_naive_roberta(model)
+        log = "Epoch {}, Accuracy {}, F1 Score {}".format(epoch, acc, f1)
+        print(log)
+        write_log(log, path='naive_roberta_train.log')
+        # save model
+        model.save_model(epoch)
+
+
+def test_naive_roberta(load_epoch):
+    class_to_idx = {class_name: idx for idx, class_name in enumerate(EMOTION_LABELS)}
+    device = naive_roberta_config.device
+    # load trained model
+    model = NaiveRoBERTa()
+    model.load_model(load_epoch)
+    model.to(device)
+
+    # confusion matrix
+    confusion_matrix = np.zeros((len(EMOTION_LABELS), len(EMOTION_LABELS)))
+
+    with torch.no_grad():
+        model.eval()
+        test_dataloader = dataloaderMELD(datapath=naive_roberta_config.Path.data, subset="test",
+                                         batch_size=32,
+                                         shuffle=False)
+        predictions = []
+        truths = []
+        bar = tqdm(test_dataloader)
+        for index, sample in enumerate(bar):
+            label = [class_to_idx[class_name] for class_name in sample["emotion"]]
+            truths.append(np.array(label))
+            pred = model(sample, return_loss=False)
+            pred = torch.argmax(pred, dim=-1)
+            predictions.append(pred.cpu().detach().numpy())
+        predictions = np.concatenate(predictions)
+        truths = np.concatenate(truths)
+        # update the confusion matrix
+        for idx, pred_class in enumerate(predictions):
+            confusion_matrix[truths[idx]][pred_class] += 1
+
+        # compute the weighted F1
+        acc = accuracy_score(truths, predictions)
+        wf1 = f1_score(truths, predictions, labels=np.arange(7), average='weighted')
+
+    log = "Test Epoch {}, Accuracy {}, F1 Score {}".format(load_epoch, acc, wf1)
+    print(log)
+    print(confusion_matrix.astype('int32'))
+
+
+MODELS = {
+    "naive-roberta": {
+        "train": train_naive_roberta,
+        "test": test_naive_roberta
+    }
+}

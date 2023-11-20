@@ -4,9 +4,10 @@ import torch.nn.functional as F
 import os
 from modules.imagebind.models.imagebind_model import ImageBindModel
 import configs.config_baseline as default_config
-from modules.confede.decoder.classifier import BaseClassifier
+from modules.decoder.classifier import BaseClassifier
 from modules.imagebind.models.imagebind_model import ModalityType
 from modules.imagebind.data import load_and_transform_text as tokenize
+from modules.projectors.projectors_model import Projectors
 
 EMOTION_LABELS = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
 
@@ -30,16 +31,18 @@ class Baseline(nn.Module):
             imu_drop_path=0.7,
         )
 
-        hidden_size = [encoder_fea_dim, int(encoder_fea_dim / 2), int(encoder_fea_dim / 4), int(encoder_fea_dim / 8), ]
+        hidden_size = [encoder_fea_dim * 2, encoder_fea_dim, int(encoder_fea_dim / 2), int(encoder_fea_dim / 4),
+                       int(encoder_fea_dim / 8), ]
 
         self.config = config
         self.class_to_idx = {class_name: idx for idx, class_name in enumerate(EMOTION_LABELS)}
         self.num_classes = len(EMOTION_LABELS)
 
-        self.decoder = BaseClassifier(input_size=encoder_fea_dim * 3,
+        self.decoder = BaseClassifier(input_size=encoder_fea_dim * 4,
                                       hidden_size=hidden_size,
                                       output_size=self.num_classes, drop_out=drop_out,
                                       name='NaiveClassifier', )
+        self.projectors = Projectors()
 
         self.criterion = nn.MSELoss()
 
@@ -57,6 +60,8 @@ class Baseline(nn.Module):
         v_embed = embeddings[ModalityType.VISION]
         a_embed = embeddings[ModalityType.AUDIO]
         t_embed = embeddings[ModalityType.TEXT]
+        v_embed_facial, v_embed_gesture = self.projectors(v_embed)
+        v_embed = torch.cat((v_embed_facial, v_embed_gesture), dim=-1)
         v_embed = v_embed.view(batch_size, fcnt, -1)
         mean_embeds = []
         for i in range(batch_size):
@@ -92,6 +97,8 @@ class Baseline(nn.Module):
             return pred_result, None
 
     def freeze_imagebind(self):
+        for name, param in self.projectors.named_parameters():
+            param.requires_grad = False
         for name, param in self.imagebind.named_parameters():
             if 'adapters' not in name:
                 param.requires_grad = False
@@ -100,6 +107,7 @@ class Baseline(nn.Module):
         if load_pretrain:
             encoder_path = os.path.join(self.config.MELD.Path.checkpoints_path, 'imagebind_huge.pth')
             self.imagebind.load_state_dict(torch.load(encoder_path), strict=False)
+            self.projectors.load_state_dict(torch.load(self.config.MELD.Path.projectors_path))
         else:
             checkpoint_path = os.path.join(self.config.MELD.Path.checkpoints_path,
                                            'baseline_' + str(load_checkpoint_epoch) + '.pth')
