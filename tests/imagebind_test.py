@@ -11,7 +11,7 @@ video_paths = [".assets/dia0_utt0.mp4", ".assets/dia0_utt1.mp4", ".assets/dia0_u
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # Instantiate model
-model = imagebind_model.imagebind_huge(ckpt_path="../checkpoints/imagebind_huge.pth")
+model = imagebind_model.imagebind_huge(ckpt_path="../modules/imagebind/imagebind_huge.pth")
 model.eval()
 model.to(device)
 

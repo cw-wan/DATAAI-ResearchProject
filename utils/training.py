@@ -1,18 +1,11 @@
 from modules.confede.TVA_fusion import TVAFusion
-from modules.baseline.baseline_model import Baseline
 from dataloaders.MELD_dataloader import dataloaderMELD
-from configs import config_meld, config_baseline, config_projectors, naive_roberta_config
-from modules.imagebind.models.imagebind_model import ImageBindModel, ModalityType
-from modules.projectors.projectors_model import Projectors
-from modules.imagebind.data import load_and_transform_text as tokenize_imagebind
-from modules.naive_roberta.model import NaiveRoBERTa
+from configs import config_meld, naive_roberta_config, naive_imagebind_adapter_config
+from modules import NaiveRoBERTa, NaiveImagebindAdapter
 import torch
 import transformers
 from tqdm import tqdm
 import numpy as np
-import os
-from torch import nn
-import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, f1_score
 from utils.common import write_log
 
@@ -27,29 +20,9 @@ def build_tva_fusion(epoch):
     return model
 
 
-def build_baseline(epoch):
-    model = Baseline()
-    model.load_model(load_checkpoint_epoch=epoch)
-    model.to(config_baseline.DEVICE)
-    return model
-
-
 MODEL_BUILDER = {
     "TVA_Fusion": build_tva_fusion,
-    "Baseline": build_baseline
 }
-
-
-class CrossEn(nn.Module):
-    def __init__(self, ):
-        super(CrossEn, self).__init__()
-
-    def forward(self, sim_matrix):
-        logpt = F.log_softmax(sim_matrix, dim=-1)
-        logpt = torch.diag(logpt)
-        nce_loss = -logpt
-        sim_loss = nce_loss.mean()
-        return sim_loss
 
 
 def _update_matrix(dataloader, model):
@@ -162,150 +135,7 @@ def train_tva_fusion():
             model.save_model(epoch=epoch)
 
 
-def train_baseline():
-    model = Baseline()
-    model.load_model(load_pretrain=True)
-    model.freeze_imagebind()
-
-    device = config_baseline.DEVICE
-    batch_size = config_baseline.MELD.Downstream.batch_size
-    lr = config_baseline.MELD.Downstream.lr
-    total_epoch = config_baseline.MELD.Downstream.epoch
-    num_warm_up = config_baseline.MELD.Downstream.num_warm_up
-
-    train_dataloader = dataloaderMELD(datapath=config_baseline.MELD.Path.raw_data_path,
-                                      subset="train",
-                                      batch_size=batch_size,
-                                      shuffle=True)
-
-    optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, model.parameters()), lr=lr, amsgrad=False, )
-    scheduler = transformers.optimization.get_linear_schedule_with_warmup(optimizer,
-                                                                          num_warmup_steps=int(
-                                                                              num_warm_up * (len(train_dataloader))),
-                                                                          num_training_steps=total_epoch * len(
-                                                                              train_dataloader), )
-    model.to(device)
-
-    loss = 0
-    for epoch in range(1, total_epoch + 1):
-        model.train()
-        bar = tqdm(train_dataloader)
-        for index, sample, in enumerate(bar):
-            bar.set_description(
-                "Epoch:%d|Loss:%s" % (epoch, loss))
-
-            optimizer.zero_grad()
-            pred_result, loss = model(sample)
-            loss.backward()
-            optimizer.step()
-            scheduler.step()
-
-        print("EVAL valid")
-        acc, wf1 = eval_model(model, config=config_baseline)
-        log = "Epoch {}, Accuracy {}, F1 Score {}".format(epoch, acc, wf1)
-        print(log)
-        write_log(log, path='baseline_train.log')
-        model.save_model(epoch=epoch)
-
-
-def train_projectors():
-    device = config_projectors.DEVICE
-    # load and freeze imagebind
-    imagebind = ImageBindModel(
-        vision_embed_dim=1280,
-        vision_num_blocks=32,
-        vision_num_heads=16,
-        text_embed_dim=1024,
-        text_num_blocks=24,
-        text_num_heads=16,
-        out_embed_dim=1024,
-        audio_drop_path=0.1,
-        imu_drop_path=0.7,
-    )
-    encoder_path = os.path.join(config_meld.MELD.Path.checkpoints_path, 'imagebind_huge.pth')
-    imagebind.load_state_dict(torch.load(encoder_path), strict=False)
-    for name, param in imagebind.named_parameters():
-        param.requires_grad = False
-    imagebind.to(device)
-    imagebind.eval()
-    # init projectors
-    projectors = Projectors()
-
-    batch_size = config_projectors.MELD.Downstream.batch_size
-    lr = config_projectors.MELD.Downstream.lr
-    total_epoch = config_projectors.MELD.Downstream.epoch
-    num_warm_up = config_projectors.MELD.Downstream.num_warm_up
-
-    train_dataloader = dataloaderMELD(datapath=config_projectors.MELD.Path.raw_data_path,
-                                      subset="train",
-                                      batch_size=batch_size,
-                                      shuffle=True)
-
-    optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, projectors.parameters()), lr=lr,
-                                  amsgrad=False, )
-    scheduler = transformers.optimization.get_linear_schedule_with_warmup(optimizer,
-                                                                          num_warmup_steps=int(
-                                                                              num_warm_up * (len(train_dataloader))),
-                                                                          num_training_steps=total_epoch * len(
-                                                                              train_dataloader), )
-    projectors.to(device)
-
-    loss = 0.0
-    for epoch in range(1, total_epoch + 1):
-        projectors.train()
-        bar = tqdm(train_dataloader)
-        for index, sample, in enumerate(bar):
-            bar.set_description("Epoch:%d|Loss:%s" % (epoch, loss))
-
-            vision = sample["vision"].clone().detach().to(device)
-            batch_size, fcnt, c, h, w = vision.shape
-            video_mask = sample["video_mask"]
-            emotion = sample["emotion"]
-            speaker = sample["speaker"]
-            text = []
-            for i in range(batch_size):
-                # prompting template
-                text_facial_expression = "The facial expression of " + speaker[i] + " suggests " + emotion[i]
-                text.append(text_facial_expression)
-            for i in range(batch_size):
-                text_gesture = "The gesture of " + speaker[i] + " suggests " + emotion[i]
-                text.append(text_gesture)
-            text = tokenize_imagebind(text, device=device)
-            vision = vision.view(batch_size * fcnt, c, h, w)
-            inputs = {
-                ModalityType.TEXT: text,
-                ModalityType.VISION: vision,
-            }
-            embeddings = imagebind(inputs)
-            v_embed = embeddings[ModalityType.VISION]
-            t_embed = embeddings[ModalityType.TEXT]
-            v_embed_facial, v_embed_gesture = projectors(v_embed)
-            v_embed = torch.cat((v_embed_facial, v_embed_gesture), dim=0)
-            v_embed = v_embed.view(batch_size * 2, fcnt, -1)
-            # compute similarity matrix
-            similarity_matrix = torch.zeros((batch_size * 2, batch_size * 2)).to(device)
-            # WRONG! t_embed /= t_embed.norm(dim=-1, keepdim=True)
-            # WRONG! v_embed /= v_embed.norm(dim=-1, keepdim=True)
-            t_embed = t_embed / t_embed.norm(dim=-1, keepdim=True)
-            v_embed = v_embed / v_embed.norm(dim=-1, keepdim=True)
-            # RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [128, 1024]], which is output 0 of DivBackward0, is at version 1; expected version 0 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
-            for i in range(batch_size * 2):
-                for j in range(batch_size * 2):
-                    similarity_matrix[i][j] = torch.max(
-                        t_embed[i] @ v_embed[j, :int(torch.sum(video_mask[int(j / 2)]))].T)
-            # compute loss
-            cross_entropy_loss = CrossEn()
-            loss = (cross_entropy_loss(similarity_matrix) + cross_entropy_loss(similarity_matrix.T)) / 2
-            # back prop
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            scheduler.step()
-        # save model
-        projectors.save_model(epoch=epoch)
-
-
-def test(model, epoch):
+def test_tva_fusion(model, epoch):
     # build the model
     model = MODEL_BUILDER[model](epoch)
 
@@ -361,8 +191,6 @@ def eval_naive_roberta(model):
             predictions.append(pred.cpu().detach().numpy())
         predictions = np.concatenate(predictions)
         truths = np.concatenate(truths)
-        print(predictions)
-        print(truths)
         acc = accuracy_score(truths, predictions)
         f1 = f1_score(truths, predictions, labels=np.arange(7), average='weighted')
     return acc, f1
@@ -383,7 +211,7 @@ def train_naive_roberta():
 
     # init dataloader
     train_dataloader = dataloaderMELD(datapath=naive_roberta_config.Path.data, subset="train",
-                                      batch_size=32,
+                                      batch_size=batch_size,
                                       shuffle=False)
 
     # weight decay
@@ -472,9 +300,141 @@ def test_naive_roberta(load_epoch):
     print(confusion_matrix.astype('int32'))
 
 
+def eval_naive_imagebind_adapter(model):
+    class_to_idx = {class_name: idx for idx, class_name in enumerate(EMOTION_LABELS)}
+    with torch.no_grad():
+        model.eval()
+        eval_dataloader = dataloaderMELD(datapath=naive_imagebind_adapter_config.Path.data, subset="dev", batch_size=32,
+                                         shuffle=False)
+        predictions = []
+        truths = []
+        bar = tqdm(eval_dataloader)
+        for index, sample in enumerate(bar):
+            label = [class_to_idx[class_name] for class_name in sample["emotion"]]
+            truths.append(np.array(label))
+            pred = model(sample, return_loss=False)
+            pred = torch.argmax(pred, dim=-1)
+            predictions.append(pred.cpu().detach().numpy())
+        predictions = np.concatenate(predictions)
+        truths = np.concatenate(truths)
+        acc = accuracy_score(truths, predictions)
+        f1 = f1_score(truths, predictions, labels=np.arange(7), average='weighted')
+    return acc, f1
+
+
+def train_naive_imagebind_adapter():
+    device = naive_roberta_config.device
+    # load training parameters
+    batch_size = naive_imagebind_adapter_config.DownStream.batch_size
+    learning_rate = naive_imagebind_adapter_config.DownStream.learning_rate
+    warm_up = naive_imagebind_adapter_config.DownStream.warm_up
+    total_epoch = naive_imagebind_adapter_config.DownStream.total_epoch
+    decay = naive_imagebind_adapter_config.DownStream.decay
+
+    # init model
+    model = NaiveImagebindAdapter()
+    model.load_model(load_pretrain=True)
+    model.freeze_imagebind()
+    model.to(device)
+
+    # init dataloader
+    train_dataloader = dataloaderMELD(datapath=naive_imagebind_adapter_config.Path.data,
+                                      subset="train",
+                                      batch_size=batch_size,
+                                      shuffle=False)
+
+    # weight decay
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_params = [
+        {
+            "params": [p for n, p in model.named_parameters() if
+                       p.requires_grad and not any(nd in n for nd in no_decay)],
+            "weight_decay": decay,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if p.requires_grad and any(nd in n for nd in no_decay)],
+            "weight_decay": 0.0,
+        },
+    ]
+
+    # init optimizer
+    optimizer = torch.optim.AdamW(params=optimizer_grouped_params, lr=learning_rate, amsgrad=False)
+    scheduler = transformers.optimization.get_linear_schedule_with_warmup(optimizer,
+                                                                          num_warmup_steps=int(
+                                                                              warm_up * (len(train_dataloader))),
+                                                                          num_training_steps=total_epoch * len(
+                                                                              train_dataloader), )
+
+    # train
+    loss = 0
+    for epoch in range(1, total_epoch + 1):
+        model.train()
+        bar = tqdm(train_dataloader)
+        for index, sample, in enumerate(bar):
+            bar.set_description("Epoch:%d|Loss:%s" % (epoch, loss))
+            pred, loss = model(sample)
+            # back prop
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+        # evaluate
+        acc, f1 = eval_naive_imagebind_adapter(model)
+        log = "Epoch {}, Accuracy {}, F1 Score {}".format(epoch, acc, f1)
+        print(log)
+        write_log(log, path='naive_imagebind_adapter_train.log')
+        # save model
+        model.save_model(epoch)
+
+
+def test_naive_imagebind_adapter(load_epoch):
+    class_to_idx = {class_name: idx for idx, class_name in enumerate(EMOTION_LABELS)}
+    device = naive_imagebind_adapter_config.device
+    # load trained model
+    model = NaiveImagebindAdapter()
+    model.load_model(load_pretrain=False, load_checkpoint_epoch=load_epoch)
+    model.to(device)
+
+    # confusion matrix
+    confusion_matrix = np.zeros((len(EMOTION_LABELS), len(EMOTION_LABELS)))
+
+    with torch.no_grad():
+        model.eval()
+        test_dataloader = dataloaderMELD(datapath=naive_imagebind_adapter_config.Path.data,
+                                         subset="test",
+                                         batch_size=32,
+                                         shuffle=False)
+        predictions = []
+        truths = []
+        bar = tqdm(test_dataloader)
+        for index, sample in enumerate(bar):
+            label = [class_to_idx[class_name] for class_name in sample["emotion"]]
+            truths.append(np.array(label))
+            pred = model(sample, return_loss=False)
+            pred = torch.argmax(pred, dim=-1)
+            predictions.append(pred.cpu().detach().numpy())
+        predictions = np.concatenate(predictions)
+        truths = np.concatenate(truths)
+        # update the confusion matrix
+        for idx, pred_class in enumerate(predictions):
+            confusion_matrix[truths[idx]][pred_class] += 1
+
+        # compute the weighted F1
+        acc = accuracy_score(truths, predictions)
+        wf1 = f1_score(truths, predictions, labels=np.arange(7), average='weighted')
+
+    log = "Test Epoch {}, Accuracy {}, F1 Score {}".format(load_epoch, acc, wf1)
+    print(log)
+    print(confusion_matrix.astype('int32'))
+
+
 MODELS = {
     "naive-roberta": {
         "train": train_naive_roberta,
         "test": test_naive_roberta
+    },
+    "naive-imagebind-adapter": {
+        "train": train_naive_imagebind_adapter,
+        "test": test_naive_imagebind_adapter
     }
 }
