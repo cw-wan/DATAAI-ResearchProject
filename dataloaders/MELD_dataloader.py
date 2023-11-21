@@ -114,8 +114,29 @@ class DatasetMELD(Dataset):
             samples[key] = torch.stack(samples[key])
         return samples
 
-    def negative_samples(self, idx):
-        pass
+    def contrastive_sample(self, idx):
+        # sampling 1 positive sample & 6 negative samples
+        samples_idx = []
+        for i in idx:
+            label = self.data[i]["emotion"]
+            np.random.shuffle(self.emotion2idx[label])
+            if self.emotion2idx[label][0] != i:
+                samples_idx.append(self.emotion2idx[label][0])
+            else:
+                samples_idx.append(self.emotion2idx[label][1])
+            for L, I in self.emotion2idx.items():
+                if label != L:
+                    np.random.shuffle(I)
+                    samples_idx.append(I[0])
+        samples = {}
+        for key in self.data[0].keys():
+            samples[key] = []
+        for i in samples_idx:
+            for key in samples.keys():
+                samples[key].append(self.data[i][key])
+        for key in ["vision", "video_mask", "audio"]:
+            samples[key] = torch.stack(samples[key])
+        return samples
 
 
 def dataloaderMELD(datapath, subset, batch_size, shuffle=True):

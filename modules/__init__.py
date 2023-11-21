@@ -1,2 +1,4 @@
 from modules.naive_roberta.model import NaiveRoBERTa
 from modules.naive_imagebind_adapter.model import NaiveImagebindAdapter
+from modules.imagebind_adapter_contrastive.model import ImagebindAdapterContrastive
+from modules.roberta_contrastive.model import ContrastiveRoBERTa
