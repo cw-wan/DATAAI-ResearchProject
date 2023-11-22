@@ -109,6 +109,9 @@ def train_tva_fusion():
     all_loss = torch.tensor(0)
     pred_loss = torch.tensor(0)
     contrastive_loss = torch.tensor(0)
+    acc, wf1, mf1 = eval_tva_fusion(model, config=config_meld)
+    log = "Before training, Accuracy {}, Weighted F1 Score {}, Macro F1 Score".format(acc, wf1, mf1)
+    print(log)
     for epoch in range(1, total_epoch + 1):
         _update_matrix(train_dataloader, model)
         model.train()
