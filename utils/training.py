@@ -106,16 +106,17 @@ def train_tva_fusion():
                                                                               train_dataloader), )
     model.to(device)
 
-    all_loss = 0
-    pred_loss = 0
-    contrastive_loss = 0
+    all_loss = torch.tensor(0)
+    pred_loss = torch.tensor(0)
+    contrastive_loss = torch.tensor(0)
     for epoch in range(1, total_epoch + 1):
         _update_matrix(train_dataloader, model)
         model.train()
         bar = tqdm(train_dataloader)
         for index, sample1, in enumerate(bar):
             bar.set_description(
-                "Epoch:%d|All_loss:%s|Loss:%s|Contrastive_loss:%s" % (epoch, all_loss, pred_loss, contrastive_loss))
+                "Epoch:%d|All_loss:%s|Loss:%s|Contrastive_loss:%s" % (
+                    epoch, all_loss.item(), pred_loss.item(), contrastive_loss.item()))
 
             optimizer.zero_grad()
 
