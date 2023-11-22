@@ -109,9 +109,6 @@ def train_tva_fusion():
     all_loss = torch.tensor(0)
     pred_loss = torch.tensor(0)
     contrastive_loss = torch.tensor(0)
-    acc, wf1, mf1 = eval_tva_fusion(model, config=config_meld)
-    log = "Before training, Accuracy {}, Weighted F1 Score {}, Macro F1 Score".format(acc, wf1, mf1)
-    print(log)
     for epoch in range(1, total_epoch + 1):
         _update_matrix(train_dataloader, model)
         model.train()
@@ -134,7 +131,7 @@ def train_tva_fusion():
 
         print("EVAL valid")
         acc, wf1, mf1 = eval_tva_fusion(model, config=config_meld)
-        log = "Epoch {}, Accuracy {}, Weighted F1 Score {}, Macro F1 Score".format(epoch, acc, wf1, mf1)
+        log = "Epoch {}, Accuracy {}, Weighted F1 Score {}, Macro F1 Score {}".format(epoch, acc, wf1, mf1)
         print(log)
         write_log(log, path='TVA_Fusion_train.log')
         model.save_model(epoch=epoch)
@@ -178,7 +175,7 @@ def test_tva_fusion(load_epoch):
         wf1 = f1_score(truth, pred, labels=np.arange(7), average='weighted')
         mf1 = f1_score(truth, pred, labels=np.arange(7), average='macro')
 
-    log = "Test Epoch {}, Accuracy {}, Weighted F1 Score {}, Macro F1 Score".format(load_epoch, acc, wf1, mf1)
+    log = "Test Epoch {}, Accuracy {}, Weighted F1 Score {}, Macro F1 Score {}".format(load_epoch, acc, wf1, mf1)
     print(log)
     print(confusion_matrix)
 
