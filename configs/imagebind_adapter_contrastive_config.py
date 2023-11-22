@@ -17,8 +17,7 @@ class Model:
 
 class DownStream:
     output_size = 7
-    dev_train_ratio = 0.1
-    batch_size = 2
+    batch_size = 4
     learning_rate = 3e-5
     warm_up = 1
     total_epoch = 20
