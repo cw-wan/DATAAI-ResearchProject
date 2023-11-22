@@ -12,7 +12,7 @@ class Path:
 class Model:
     embedding_size = 768
     temperature = 0.5
-    contrastive_loss_weight = 0.3
+    contrastive_loss_weight = 0.1
 
 
 class DownStream:

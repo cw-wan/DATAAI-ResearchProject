@@ -6,6 +6,7 @@ from modules.decoder import BaseClassifier
 from transformers import AutoModel
 from transformers import RobertaTokenizer
 from configs import naive_roberta_config as base_config
+from modules.loss import FocalLoss
 
 EMOTION_LABELS = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
 
@@ -30,7 +31,11 @@ class NaiveRoBERTa(nn.Module):
                                       hidden_size=hidden_size,
                                       output_size=self.config.DownStream.output_size)
 
-        self.criterion = nn.BCELoss()
+        assert self.config.Model.loss in ["focal", "bce"]
+        if self.config.Model.loss == "focal":
+            self.criterion = FocalLoss(gamma=self.config.Model.gamma)
+        elif self.config.Model.loss == "bce":
+            self.criterion = nn.BCELoss()
 
     def encode(self, texts):
         tokens = self.tokenizer(texts, return_tensors='pt', padding=True, truncation=True)
@@ -40,11 +45,14 @@ class NaiveRoBERTa(nn.Module):
 
     def forward(self, samples, return_loss=True):
         cls = self.encode(samples["text"])[:, 0]
-        label = [self.class_to_idx[class_name] for class_name in samples["emotion"]]
-        label = F.one_hot(torch.tensor(label), self.num_classes).to(self.device)
+        logits = [self.class_to_idx[class_name] for class_name in samples["emotion"]]
+        target = F.one_hot(torch.tensor(logits), self.num_classes).to(self.device)
         pred = self.decoder(cls)
         if return_loss:
-            loss = self.criterion(pred.float(), label.float())
+            if self.config.Model.loss == "focal":
+                loss = self.criterion(pred.float(), torch.tensor(logits).to(self.device))
+            elif self.config.Model.loss == "bce":
+                loss = self.criterion(pred.float(), target.float())
             return loss, pred
         else:
             return pred
