@@ -134,8 +134,7 @@ def train_tva_fusion():
         log = "Epoch {}, Accuracy {}, Weighted F1 Score {}, Macro F1 Score".format(epoch, acc, wf1, mf1)
         print(log)
         write_log(log, path='TVA_Fusion_train.log')
-        if epoch > 1:
-            model.save_model(epoch=epoch)
+        model.save_model(epoch=epoch)
 
 
 def test_tva_fusion(load_epoch):
