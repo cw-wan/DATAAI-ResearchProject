@@ -5,6 +5,7 @@ DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 class MELD:
     class Path:
+        imagebind = "modules/imagebind"
         checkpoints_path = 'checkpoints/'
         raw_data_path = 'data/MELD'
 

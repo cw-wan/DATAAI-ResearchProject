@@ -224,7 +224,7 @@ class TVAFusion(nn.Module):
 
     def load_model(self, load_pretrain=False, load_checkpoint_epoch=None):
         if load_pretrain:
-            encoder_path = os.path.join(self.config.MELD.Path.checkpoints_path, 'imagebind_huge.pth')
+            encoder_path = os.path.join(self.config.MELD.Path.imagebind, 'imagebind_huge.pth')
             self.imagebind.load_state_dict(torch.load(encoder_path), strict=False)
         else:
             checkpoint_path = os.path.join(self.config.MELD.Path.checkpoints_path,

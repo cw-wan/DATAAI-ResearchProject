@@ -13,19 +13,6 @@ from utils.common import write_log
 EMOTION_LABELS = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
 
 
-def build_tva_fusion(epoch):
-    model = TVAFusion()
-    model.load_model(load_checkpoint_epoch=epoch)
-    device = config_meld.DEVICE
-    model.to(device)
-    return model
-
-
-MODEL_BUILDER = {
-    "TVA_Fusion": build_tva_fusion,
-}
-
-
 def _update_matrix(dataloader, model):
     with torch.no_grad():
         model.eval()
@@ -53,7 +40,7 @@ def _update_matrix(dataloader, model):
     return sim_matrix
 
 
-def eval_model(model, config):
+def eval_tva_fusion(model, config):
     class_to_idx = {class_name: idx for idx, class_name in enumerate(EMOTION_LABELS)}
     with torch.no_grad():
         model.eval()
@@ -74,8 +61,9 @@ def eval_model(model, config):
         truth = np.concatenate(truth)
         acc = accuracy_score(truth, pred)
         wf1 = f1_score(truth, pred, labels=np.arange(7), average='weighted')
+        mf1 = f1_score(truth, pred, labels=np.arange(7), average='macro')
         model.train()
-    return acc, wf1
+    return acc, wf1, mf1
 
 
 def train_tva_fusion():
@@ -96,7 +84,21 @@ def train_tva_fusion():
                                       batch_size=batch_size,
                                       shuffle=True)
 
-    optimizer = torch.optim.AdamW(params=filter(lambda p: p.requires_grad, model.parameters()), lr=lr, amsgrad=False, )
+    # weight decay
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_params = [
+        {
+            "params": [p for n, p in model.named_parameters() if
+                       p.requires_grad and not any(nd in n for nd in no_decay)],
+            "weight_decay": decay,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if p.requires_grad and any(nd in n for nd in no_decay)],
+            "weight_decay": 0.0,
+        },
+    ]
+
+    optimizer = torch.optim.AdamW(params=optimizer_grouped_params, lr=lr, amsgrad=False, )
     scheduler = transformers.optimization.get_linear_schedule_with_warmup(optimizer,
                                                                           num_warmup_steps=int(
                                                                               num_warm_up * (len(train_dataloader))),
@@ -104,17 +106,17 @@ def train_tva_fusion():
                                                                               train_dataloader), )
     model.to(device)
 
-    all_loss = 0
-    pred_loss = 0
-    contrastive_loss = 0
+    all_loss = torch.tensor(0)
+    pred_loss = torch.tensor(0)
+    contrastive_loss = torch.tensor(0)
     for epoch in range(1, total_epoch + 1):
-        if epoch % 2 == 1:  # originally: epoch % 2 == 1, but since imagebing frozen, no need to update
-            _update_matrix(train_dataloader, model)
+        _update_matrix(train_dataloader, model)
         model.train()
         bar = tqdm(train_dataloader)
         for index, sample1, in enumerate(bar):
             bar.set_description(
-                "Epoch:%d|All_loss:%s|Loss:%s|Contrastive_loss:%s" % (epoch, all_loss, pred_loss, contrastive_loss))
+                "Epoch:%d|All_loss:%s|Loss:%s|Contrastive_loss:%s" % (
+                    epoch, all_loss.item(), pred_loss.item(), contrastive_loss.item()))
 
             optimizer.zero_grad()
 
@@ -128,17 +130,19 @@ def train_tva_fusion():
             scheduler.step()
 
         print("EVAL valid")
-        acc, wf1 = eval_model(model, config=config_meld)
-        log = "Epoch {}, Accuracy {}, F1 Score {}".format(epoch, acc, wf1)
+        acc, wf1, mf1 = eval_tva_fusion(model, config=config_meld)
+        log = "Epoch {}, Accuracy {}, Weighted F1 Score {}, Macro F1 Score".format(epoch, acc, wf1, mf1)
         print(log)
         write_log(log, path='TVA_Fusion_train.log')
-        if epoch > 1:
-            model.save_model(epoch=epoch)
+        model.save_model(epoch=epoch)
 
 
-def test_tva_fusion(model, epoch):
+def test_tva_fusion(load_epoch):
     # build the model
-    model = MODEL_BUILDER[model](epoch)
+    model = TVAFusion()
+    model.load_model(load_checkpoint_epoch=load_epoch)
+    device = config_meld.DEVICE
+    model.to(device)
 
     # confusion matrix
     confusion_matrix = np.zeros((len(EMOTION_LABELS), len(EMOTION_LABELS)))
@@ -169,8 +173,9 @@ def test_tva_fusion(model, epoch):
         # compute the weighted F1
         acc = accuracy_score(truth, pred)
         wf1 = f1_score(truth, pred, labels=np.arange(7), average='weighted')
+        mf1 = f1_score(truth, pred, labels=np.arange(7), average='macro')
 
-    log = "Test Epoch {}, Accuracy {}, F1 Score {}".format(epoch, acc, wf1)
+    log = "Test Epoch {}, Accuracy {}, Weighted F1 Score {}, Macro F1 Score".format(load_epoch, acc, wf1, mf1)
     print(log)
     print(confusion_matrix)
 
@@ -710,5 +715,9 @@ MODELS = {
     "contrastive-roberta": {
         "train": train_contrastive_roberta,
         "test": test_contrastive_roberta
+    },
+    "confede-imagebind-adapter": {
+        "train": train_tva_fusion,
+        "test": test_tva_fusion
     }
 }
