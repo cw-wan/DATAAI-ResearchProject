@@ -13,7 +13,7 @@ class MELD:
         const_heat = 0.5
 
         batch_size = 3
-        lr = 3e-5
+        lr = 1e-4
         epoch = 25
         decay = 1e-3
         num_warm_up = 1

@@ -199,7 +199,8 @@ def eval_naive_roberta(model):
         truths = np.concatenate(truths)
         acc = accuracy_score(truths, predictions)
         f1 = f1_score(truths, predictions, labels=np.arange(7), average='weighted')
-    return acc, f1
+        mf1 = f1_score(truths, predictions, labels=np.arange(7), average='macro')
+    return acc, f1, mf1
 
 
 def train_naive_roberta():
@@ -244,8 +245,8 @@ def train_naive_roberta():
 
     # train
     loss = 0
-    acc, f1 = eval_naive_roberta(model)
-    print("Before training, Accuracy {}, F1 Score {}".format(acc, f1))
+    acc, f1, mf1 = eval_naive_roberta(model)
+    print("Before training, Accuracy {}, Weighted F1 Score {}, Macro F1 Score {}".format(acc, f1, mf1))
     for epoch in range(1, total_epoch + 1):
         model.train()
         bar = tqdm(train_dataloader)
@@ -258,8 +259,8 @@ def train_naive_roberta():
             optimizer.step()
             scheduler.step()
         # evaluate
-        acc, f1 = eval_naive_roberta(model)
-        log = "Epoch {}, Accuracy {}, F1 Score {}".format(epoch, acc, f1)
+        acc, f1, mf1 = eval_naive_roberta(model)
+        log = "Epoch {}, Accuracy {}, Weighted F1 Score {}, Macro F1 Score {}".format(epoch, acc, f1, mf1)
         print(log)
         write_log(log, path='naive_roberta_train.log')
         # save model
@@ -300,8 +301,9 @@ def test_naive_roberta(load_epoch):
         # compute the weighted F1
         acc = accuracy_score(truths, predictions)
         wf1 = f1_score(truths, predictions, labels=np.arange(7), average='weighted')
+        mf1 = f1_score(truths, predictions, labels=np.arange(7), average='macro')
 
-    log = "Test Epoch {}, Accuracy {}, F1 Score {}".format(load_epoch, acc, wf1)
+    log = "Test Epoch {}, Accuracy {}, Weighted F1 Score {}, Macro F1 Score {}".format(load_epoch, acc, wf1, mf1)
     print(log)
     print(confusion_matrix.astype('int32'))
 
@@ -588,7 +590,8 @@ def eval_contrastive_roberta(model):
         truths = np.concatenate(truths)
         acc = accuracy_score(truths, predictions)
         f1 = f1_score(truths, predictions, labels=np.arange(7), average='weighted')
-    return acc, f1
+        mf1 = f1_score(truths, predictions, labels=np.arange(7), average='macro')
+    return acc, f1, mf1
 
 
 def train_contrastive_roberta():
@@ -635,8 +638,8 @@ def train_contrastive_roberta():
     loss = torch.tensor(0)
     pred_loss = torch.tensor(0)
     contrastive_loss = torch.tensor(0)
-    acc, f1 = eval_naive_roberta(model)
-    print("Before training, Accuracy {}, F1 Score {}".format(acc, f1))
+    acc, f1, mf1 = eval_contrastive_roberta(model)
+    print("Before training, Accuracy {}, Weighted F1 Score {}, Macro F1 {}".format(acc, f1, mf1))
     for epoch in range(1, total_epoch + 1):
         model.train()
         bar = tqdm(train_dataloader)
@@ -651,8 +654,8 @@ def train_contrastive_roberta():
             optimizer.step()
             scheduler.step()
         # evaluate
-        acc, f1 = eval_naive_roberta(model)
-        log = "Epoch {}, Accuracy {}, F1 Score {}".format(epoch, acc, f1)
+        acc, f1, mf1 = eval_contrastive_roberta(model)
+        log = "Epoch {}, Accuracy {}, Weighted F1 Score {}, Macro F1 Score {}".format(epoch, acc, f1, mf1)
         print(log)
         write_log(log, path='contrastive_roberta_train.log')
         # save model
@@ -693,8 +696,9 @@ def test_contrastive_roberta(load_epoch):
         # compute the weighted F1
         acc = accuracy_score(truths, predictions)
         wf1 = f1_score(truths, predictions, labels=np.arange(7), average='weighted')
+        mf1 = f1_score(truths, predictions, labels=np.arange(7), average='macro')
 
-    log = "Test Epoch {}, Accuracy {}, F1 Score {}".format(load_epoch, acc, wf1)
+    log = "Test Epoch {}, Accuracy {}, F1 Score {}, Macro F1 Score {}".format(load_epoch, acc, wf1, mf1)
     print(log)
     print(confusion_matrix.astype('int32'))
 
